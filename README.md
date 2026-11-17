@@ -32,6 +32,7 @@ The streaming engine is unchanged chiaki-ng. Everything you see on screen has be
 | **Settings** | Every tab redesigned: a sliding tab highlight, fade between tabs, and options grouped on cards |
 | **Connecting / loading** | Animated logo while connecting and while the stream starts |
 | **In-game stats** | Small HUD in the top-left corner while you play: FPS, resolution, packet loss and bitrate, colour-coded green / yellow / red. Fully transparent, on by default; turn it off with *Settings → Audio/Wifi → Show FPS / Stats While Playing*. Drawn inside the stream, with no pop-up window |
+| **Stability check** | Next to the stats it says **Stable**, **Unstable** or **Lag**. When something goes wrong a second line says what and why: *Unstable / Weak Wi-Fi* (packet loss), *Picture glitch* (frames lost on the network), *Freeze* (video stopped), *PC too slow* (frames dropped by this PC), *Low frame rate* (PS5 sending fewer frames) or *Display delay*, each with a tip to fix it |
 | **Logo & app icon** | New logo, used for the Windows `.exe` and installer, the macOS `.app` / `.dmg` and the Linux icon |
 
 All keyboard and controller shortcuts work as before. **Left / Right** now move between consoles on the home screen.

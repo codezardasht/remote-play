@@ -306,6 +306,74 @@ Item {
         readonly property int frameHeight: hasVideoStats ? Chiaki.window.streamHeight : 0
         readonly property real loss: (session && isFinite(session.averagePacketLoss)) ? session.averagePacketLoss * 100 : 0
         readonly property real mbps: (session && isFinite(session.measuredBitrate)) ? session.measuredBitrate : 0
+        readonly property int framesLostTotal: (session && isFinite(session.framesLost)) ? session.framesLost : 0
+        readonly property int droppedPerSecond: Chiaki.window.droppedFrames || 0
+        readonly property real pendingAgeMs: isFinite(Chiaki.window.pendingFrameAge) ? Chiaki.window.pendingFrameAge * 1000 : 0
+
+        // Stability: 0 = stable, 1 = minor problem, 2 = lag / unstable. issueTitle/issueReason say what and why.
+        property int stability: 0
+        property string issueTitle: ""
+        property string issueReason: ""
+        property int lastFramesLost: -1
+        property int peakFps: 0
+        property int warmupTicks: 0
+        property int holdTicks: 0
+
+        function resetStability() {
+            stability = 0; issueTitle = ""; issueReason = "";
+            lastFramesLost = -1; peakFps = 0; warmupTicks = 3; holdTicks = 0;
+        }
+
+        // Called once per second. Picks the most serious current problem and explains its likely cause.
+        function evaluateStability() {
+            const lostNow = framesLostTotal;
+            const lostDelta = lastFramesLost >= 0 ? Math.max(0, lostNow - lastFramesLost) : 0;
+            lastFramesLost = lostNow;
+            if (hasVideoStats && fps > peakFps) peakFps = fps;
+            if (warmupTicks > 0) { warmupTicks--; return; }
+
+            const expectedFps = peakFps >= 50 ? 60 : (peakFps >= 25 ? 30 : 0);
+            let sev = 0, title = "", reason = "";
+            function pick(s, t, r) { if (s > sev) { sev = s; title = t; reason = r; } }
+
+            if (hasVideoStats && Chiaki.window.hasVideo && fps === 0)
+                pick(2, qsTr("Freeze"), qsTr("No video arrived for a second: the network dropped out (Wi-Fi signal or interference)."));
+            if (loss >= 8)
+                pick(2, qsTr("Unstable Wi-Fi"), qsTr("%1% of packets lost. Move closer to the router, use 5 GHz, or use a cable.").arg(loss.toFixed(1)));
+            else if (loss >= Math.max(1, Chiaki.settings.wifiDroppedNotif || 3))
+                pick(1, qsTr("Weak Wi-Fi"), qsTr("%1% of packets lost. Small stutters are possible.").arg(loss.toFixed(1)));
+            if (lostDelta > 0)
+                pick(lostDelta >= 5 ? 2 : 1, qsTr("Picture glitch"),
+                     qsTr("%1 video frame(s) lost on the way. Usually Wi-Fi interference or a busy network.").arg(lostDelta));
+            if (droppedPerSecond >= 3)
+                pick(droppedPerSecond >= 10 ? 2 : 1, qsTr("PC too slow"),
+                     qsTr("This PC dropped %1 frames/s. Set Settings → Video → Render Preset to Fast.").arg(droppedPerSecond));
+            if (hasVideoStats && expectedFps > 0 && fps > 0 && fps < expectedFps * 0.8 && loss < 1)
+                pick(1, qsTr("Low frame rate"),
+                     qsTr("The PS5 is sending %1 of %2 FPS. A heavy game scene, or the console is limiting the stream.").arg(fps).arg(expectedFps));
+            if (pendingAgeMs >= 60)
+                pick(1, qsTr("Display delay"),
+                     qsTr("Frames wait %1 ms before showing. Turn off V-Sync or use Render Preset Fast.").arg(pendingAgeMs.toFixed(0)));
+
+            if (sev > 0) {
+                // Show the problem at least 4 s so it can be read; a worse problem replaces a milder one at once.
+                if (sev >= stability || holdTicks <= 0) { stability = sev; issueTitle = title; issueReason = reason; }
+                holdTicks = 4;
+            } else if (holdTicks > 0) {
+                holdTicks--;
+            } else {
+                stability = 0; issueTitle = ""; issueReason = "";
+            }
+        }
+
+        onVisibleChanged: if (visible) resetStability()
+
+        Timer {
+            interval: 1000
+            repeat: true
+            running: statsHud.visible
+            onTriggered: statsHud.evaluateStability()
+        }
 
         function hudItem(value, unit, valueColor) {
             return "<b><font color=\"%1\">%2</font></b> <font color=\"#a9bddb\">%3</font>".arg(valueColor).arg(value).arg(unit)
@@ -327,10 +395,14 @@ Item {
             topMargin: 18
         }
         visible: view.streamStatsVisible
-        width: hudRow.implicitWidth
-        height: hudRow.implicitHeight
+        width: hudColumn.implicitWidth
+        height: hudColumn.implicitHeight
         // Fully transparent: only the text is drawn, with a thin dark outline so it stays readable on bright scenes
         color: "transparent"
+
+        Column {
+            id: hudColumn
+            spacing: 4
 
         Row {
             id: hudRow
@@ -341,7 +413,16 @@ Item {
                 width: 8; height: 8; radius: 4
                 border.width: 1
                 border.color: "#99000000"
-                color: statsHud.goodColor(statsHud.loss < 1 ? 0 : (statsHud.loss < 5 ? 1 : 2))
+                color: statsHud.goodColor(statsHud.stability)
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                font.pixelSize: 15
+                style: Text.Outline
+                styleColor: "#cc000000"
+                font.bold: true
+                color: statsHud.goodColor(statsHud.stability)
+                text: statsHud.stability === 0 ? qsTr("Stable") : (statsHud.stability === 1 ? qsTr("Unstable") : qsTr("Lag"))
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -384,6 +465,20 @@ Item {
                 color: "#ffffff"
                 text: statsHud.hudItem(statsHud.mbps.toFixed(1), qsTr("Mbps"), "#ffffff")
             }
+        }
+
+        Text {
+            visible: statsHud.stability > 0
+            leftPadding: 18
+            width: Math.min(implicitWidth, view.width * 0.6)
+            wrapMode: Text.WordWrap
+            textFormat: Text.StyledText
+            font.pixelSize: 14
+            style: Text.Outline
+            styleColor: "#cc000000"
+            color: "#e6eefb"
+            text: "<b><font color=\"%1\">%2</font></b>  %3".arg(statsHud.goodColor(statsHud.stability)).arg(statsHud.issueTitle).arg(statsHud.issueReason)
+        }
         }
     }
 
