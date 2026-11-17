@@ -71,10 +71,19 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
+      # Pin Python: the runner default (3.15) is too new for aqtinstall and the pip build tools
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # Qt 6.11+ moved to a new download layout that aqtinstall 3.3.0 cannot read, so pin 6.10.3
       - name: Setup Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.12.*"
+          version: '6.10.3'
+          setup-python: false
+          aqtversion: '==3.3.0'
           host: 'windows'
           target: 'desktop'
           modules: 'qtwebengine qtpositioning qtwebchannel qtwebsockets qtserialport'
@@ -103,7 +112,7 @@ jobs:
 
       - name: Build SPIRV-Cross
         run: |
-          git clone https://github.com/KhronosGroup/SPIRV-Cross.git
+          git clone --depth 1 --branch vulkan-sdk-1.4.363.0 https://github.com/KhronosGroup/SPIRV-Cross.git
           cd SPIRV-Cross
           cmake `
           -DCMAKE_BUILD_TYPE=Release `
@@ -115,14 +124,32 @@ jobs:
           cmake --build build --config Release
           cmake --install build
 
+      # Google's shaderc download page is gone; use the shaderc that ships with the Vulkan SDK
       - name: Setup shaderc
         run: |
-          $ProgressPreference = 'SilentlyContinue'
-          $url = ((Invoke-WebRequest -UseBasicParsing -Uri "https://storage.googleapis.com/shaderc/badges/build_link_windows_vs2019_release.html").Content | Select-String -Pattern 'url=(.*)"').Matches.Groups[1].Value
-          Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile .\shaderc.zip
-          Expand-Archive -LiteralPath "shaderc.zip" -DestinationPath "."
-          cp "./install/*" "./${{ env.dep_folder }}" -Force -Recurse
-          rm "./install" -r -force
+          $sdk = "${{ env.VULKAN_SDK }}"
+          $deps = "${{ github.workspace }}\${{ env.dep_folder }}"
+          foreach ($f in @("$sdk\Bin\shaderc_shared.dll", "$sdk\Lib\shaderc_shared.lib", "$sdk\Include\shaderc\shaderc.h")) {
+            if (-not (Test-Path $f)) { throw "Missing from the Vulkan SDK: $f" }
+          }
+          New-Item -ItemType Directory -Force -Path "$deps\bin", "$deps\lib\pkgconfig", "$deps\include" | Out-Null
+          Copy-Item -Force "$sdk\Bin\shaderc_shared.dll" "$deps\bin\"
+          Copy-Item -Force "$sdk\Lib\shaderc_shared.lib" "$deps\lib\"
+          Copy-Item -Force -Recurse "$sdk\Include\shaderc" "$deps\include\"
+          $prefix = $deps -replace '\\','/'
+          $pc = @(
+            "prefix=$prefix",
+            'libdir=${prefix}/lib',
+            'includedir=${prefix}/include',
+            '',
+            'Name: shaderc',
+            'Description: Vulkan SDK shaderc',
+            'Version: 2025.1',
+            'Libs: -L${libdir} -lshaderc_shared',
+            'Cflags: -I${includedir}'
+          ) -join "`n"
+          [System.IO.File]::WriteAllText("$deps\lib\pkgconfig\shaderc.pc", $pc + "`n")
+          Get-Content "$deps\lib\pkgconfig\shaderc.pc"
 
       - name: Make build directory
         run: |
