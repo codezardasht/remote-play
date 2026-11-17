@@ -3020,6 +3020,12 @@ void QmlMainWindow::presentFrame(ChiakiFfmpegFrame frame, int32_t frames_lost, q
     if (!frame.frame)
         return;
 
+    if (!startup_warmup_frame_active) {
+        stream_frames_current.fetchAndAddRelaxed(1);
+        stream_width_current.storeRelaxed(frame.frame->width);
+        stream_height_current.storeRelaxed(frame.frame->height);
+    }
+
     if (bypass_frame_queue) {
         {
             QMutexLocker locker(&direct_frame_mutex);
@@ -5319,6 +5325,20 @@ renderer_backend_ready:
         if (dropped_frames != dropped_frames_next) {
             dropped_frames = dropped_frames_next;
             emit droppedFramesChanged();
+        }
+
+        const int fps_next = stream_frames_current.fetchAndStoreRelaxed(0);
+        if (!session) {
+            stream_width_current.storeRelaxed(0);
+            stream_height_current.storeRelaxed(0);
+        }
+        const int width_next = stream_width_current.loadRelaxed();
+        const int height_next = stream_height_current.loadRelaxed();
+        if (stream_fps != fps_next || stream_width != width_next || stream_height != height_next) {
+            stream_fps = fps_next;
+            stream_width = width_next;
+            stream_height = height_next;
+            emit streamVideoStatsChanged();
         }
     });
 

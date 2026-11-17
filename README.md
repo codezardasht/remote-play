@@ -31,6 +31,7 @@ The streaming engine is unchanged chiaki-ng. Everything you see on screen has be
 | **Dialogs** | Spring-in pop-ups with a dimmed background |
 | **Settings** | Every tab redesigned: a sliding tab highlight, fade between tabs, and options grouped on cards |
 | **Connecting / loading** | Animated logo while connecting and while the stream starts |
+| **In-game stats** | Small HUD in the top-left corner while you play: FPS, resolution, packet loss and bitrate, colour-coded green / yellow / red. Turn it on with *Settings → Audio/Wifi → Show Stream Stats During Gameplay*. It's drawn inside the stream, with no pop-up window |
 | **Logo & app icon** | New logo, used for the Windows `.exe` and installer, the macOS `.app` / `.dmg` and the Linux icon |
 
 All keyboard and controller shortcuts work as before. **Left / Right** now move between consoles on the home screen.
@@ -112,7 +113,7 @@ The Remote Play protocol goes up to **1080p at 60 fps**. These settings give the
 | Render Preset | Settings → Video | **Default** or **Fast** on integrated graphics | High Quality can drop frames on weaker GPUs |
 | Request IDR Frame on FEC Failure | Settings → Audio/Wifi | **Off** | Avoids short freezes when a packet can't be repaired |
 | Packet Loss Reported Max | Settings → Audio/Wifi | **15%** | Lets the console lower the bitrate during bad Wi-Fi moments instead of stuttering |
-| Show Stream Stats | Settings → Audio/Wifi | **Off** while playing | Turn on only when you want to check bitrate and packet loss |
+| Show Stream Stats | Settings → Audio/Wifi | **On** | Shows the small FPS / resolution / packet-loss HUD while you play |
 
 ## Network tips
 
@@ -127,7 +128,7 @@ Nearly all lag and freezing comes from the network, not the app. In order of imp
 5. **Different buildings or subnets:** if the console isn't found automatically, add it by IP with **+**. It still counts as a local connection.
 6. **Remote play over the internet** works through PSN. Expect lower quality than at home, and use the "Remote" column in Settings → Stream for a lower bitrate there.
 
-To check your connection, turn on **Show Stream Stats**, play for a few minutes, and watch the packet loss. Under about 1% is great. A few percent is normal on Wi-Fi. Spikes above 10% mean the network needs one of the fixes above.
+To check your connection, turn on **Show Stream Stats**, play for a few minutes, and watch the HUD in the top-left corner. Under about 1% is great. A few percent is normal on Wi-Fi. Spikes above 10% mean the network needs one of the fixes above.
 
 ---
 

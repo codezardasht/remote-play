@@ -89,11 +89,7 @@ Item {
     Component.onCompleted: {
         updateSeparateMenuGeometry();
         updateOverlayInteractionActive();
-        Chiaki.window.setStatsOverlayActive(streamStatsVisible);
-    }
-    onStreamStatsVisibleChanged: {
-        if (Chiaki.window)
-            Chiaki.window.setStatsOverlayActive(streamStatsVisible);
+        Chiaki.window.setStatsOverlayActive(false);
     }
     onWidthChanged: updateSeparateMenuGeometry()
     onHeightChanged: updateSeparateMenuGeometry()
@@ -296,6 +292,91 @@ Item {
             onClicked: Chiaki.sessionGoHome()
             Keys.onReturnPressed: clicked()
             Keys.onEscapePressed: clicked()
+        }
+    }
+
+    // Small in-stream stats HUD (FPS, resolution, packet loss, bitrate).
+    // Drawn inside the QML scene, so no extra window opens; values refresh once per second.
+    Rectangle {
+        id: statsHud
+        readonly property var session: Chiaki.session
+        readonly property bool hasVideoStats: Chiaki.window.streamFps !== undefined
+        readonly property int fps: hasVideoStats ? Chiaki.window.streamFps : 0
+        readonly property int frameWidth: hasVideoStats ? Chiaki.window.streamWidth : 0
+        readonly property int frameHeight: hasVideoStats ? Chiaki.window.streamHeight : 0
+        readonly property real loss: (session && isFinite(session.averagePacketLoss)) ? session.averagePacketLoss * 100 : 0
+        readonly property real mbps: (session && isFinite(session.measuredBitrate)) ? session.measuredBitrate : 0
+
+        function hudItem(value, unit, valueColor) {
+            return "<b><font color=\"%1\">%2</font></b> <font color=\"#a9bddb\">%3</font>".arg(valueColor).arg(value).arg(unit)
+        }
+        function goodColor(level) { return level === 0 ? "#5fe0a0" : (level === 1 ? "#ffd166" : "#ff7b7b") }
+        function resolutionName(w, h) {
+            if (h <= 0) return "";
+            if (h >= 1070 && h <= 1090) return "1080p";
+            if (h >= 710 && h <= 730) return "720p";
+            if (h >= 530 && h <= 550) return "540p";
+            if (h >= 350 && h <= 370) return "360p";
+            return "%1×%2".arg(w).arg(h);
+        }
+
+        anchors {
+            left: parent.left
+            top: parent.top
+            leftMargin: 18
+            topMargin: 18
+        }
+        visible: view.streamStatsVisible
+        width: hudRow.implicitWidth + 24
+        height: 34
+        radius: height / 2
+        color: Qt.rgba(0.02, 0.06, 0.15, 0.62)
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.12)
+
+        Row {
+            id: hudRow
+            anchors.centerIn: parent
+            spacing: 14
+
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 8; height: 8; radius: 4
+                color: statsHud.goodColor(statsHud.loss < 1 ? 0 : (statsHud.loss < 5 ? 1 : 2))
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: statsHud.hasVideoStats
+                textFormat: Text.StyledText
+                font.pixelSize: 15
+                color: "#ffffff"
+                text: statsHud.hudItem(String(statsHud.fps), qsTr("FPS"),
+                                       statsHud.goodColor(statsHud.fps >= 55 ? 0 : (statsHud.fps >= 40 ? 1 : 2)))
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: text !== ""
+                font.pixelSize: 15
+                font.bold: true
+                color: "#ffffff"
+                text: statsHud.resolutionName(statsHud.frameWidth, statsHud.frameHeight)
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.StyledText
+                font.pixelSize: 15
+                color: "#ffffff"
+                text: statsHud.hudItem(statsHud.loss.toFixed(1) + "%", qsTr("loss"),
+                                       statsHud.goodColor(statsHud.loss < 1 ? 0 : (statsHud.loss < 5 ? 1 : 2)))
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: statsHud.mbps > 0
+                textFormat: Text.StyledText
+                font.pixelSize: 15
+                color: "#ffffff"
+                text: statsHud.hudItem(statsHud.mbps.toFixed(1), qsTr("Mbps"), "#ffffff")
+            }
         }
     }
 

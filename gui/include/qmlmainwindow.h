@@ -67,6 +67,9 @@ class QmlMainWindow : public QWindow
     Q_PROPERTY(int runtimeRendererBackend READ runtimeRendererBackend CONSTANT)
     Q_PROPERTY(double queueDepthAverage READ queueDepthAverage NOTIFY queueDepthAverageChanged)
     Q_PROPERTY(double pendingFrameAge READ pendingFrameAge NOTIFY pendingFrameAgeChanged)
+    Q_PROPERTY(int streamFps READ streamFps NOTIFY streamVideoStatsChanged)
+    Q_PROPERTY(int streamWidth READ streamWidth NOTIFY streamVideoStatsChanged)
+    Q_PROPERTY(int streamHeight READ streamHeight NOTIFY streamVideoStatsChanged)
 
 public:
     enum class UpdateRequestReason {
@@ -110,6 +113,9 @@ public:
 
     bool hasVideo() const;
     int droppedFrames() const;
+    int streamFps() const { return stream_fps; }
+    int streamWidth() const { return stream_width; }
+    int streamHeight() const { return stream_height; }
     void increaseDroppedFrames();
 
     bool directStream() const;
@@ -182,6 +188,7 @@ signals:
     void pendingFrameAgeChanged();
     void loadingTransitionCompleteChanged();
     void statsOverlayActiveChanged();
+    void streamVideoStatsChanged();
 
 private:
     friend class BufferedPlaybackPacerThread;
@@ -318,6 +325,13 @@ private:
     bool is_window_adjustable = false;
     bool is_stream_window_adjustable = false;
     QAtomicInteger<int> dropped_frames_current = 0;
+    // Decoded video frames per second and frame size, for the in-stream stats HUD
+    int stream_fps = 0;
+    int stream_width = 0;
+    int stream_height = 0;
+    QAtomicInteger<int> stream_frames_current = 0;
+    QAtomicInteger<int> stream_width_current = 0;
+    QAtomicInteger<int> stream_height_current = 0;
     bool going_full = false;
     VideoMode video_mode = VideoMode::Normal;
     float zoom_factor = 0;
