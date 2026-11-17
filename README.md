@@ -58,8 +58,8 @@ All keyboard and controller shortcuts work as before. **Left / Right** now move 
 Create and push a version tag. The **Release (Windows, macOS, Linux)** workflow builds all three and publishes them:
 
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+git tag v1.10.1-rp2
+git push origin v1.10.1-rp2
 ```
 
 You can also run that workflow from the **Actions** tab and type the tag name.
