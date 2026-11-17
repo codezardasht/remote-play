@@ -45,7 +45,26 @@ All keyboard and controller shortcuts work as before. **Left / Right** now move 
 
 ## Download
 
-Builds are made by GitHub Actions in this repository:
+👉 **[Latest release](../../releases/latest)**: pick the file for your system:
+
+| System | File |
+|---|---|
+| **Windows 10 / 11** | `RemotePlay-…-Windows-Setup.exe` (installer) or `…-Windows-Portable.zip` |
+| **macOS 15+ on Apple Silicon** (M1 / M2 / M3 / M4) | `RemotePlay-…-macOS-AppleSilicon.dmg` |
+| **Linux** (x86-64) | `RemotePlay-…-Linux-x86_64.AppImage` |
+
+### Making a new release
+
+Create and push a version tag. The **Release (Windows, macOS, Linux)** workflow builds all three and publishes them:
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+You can also run that workflow from the **Actions** tab and type the tag name.
+
+### Test builds without a release
 
 1. Open the **[Actions](../../actions)** tab.
 2. Pick a workflow on the left and click **Run workflow** → `main`:

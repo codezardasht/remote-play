@@ -1,0 +1,91 @@
+name: Release (Windows, macOS, Linux)
+
+# Push a tag like v1.0.0 to build all three apps and publish them as a GitHub Release.
+# Or run it by hand from the Actions tab and type the tag name.
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to create, for example v1.0.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    uses: ./.github/workflows/build-windows-x86.yml
+
+  macos:
+    uses: ./.github/workflows/build-macos.yml
+
+  linux:
+    uses: ./.github/workflows/build-appimage-x64.yml
+
+  publish:
+    name: Publish the release
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download the builds
+        uses: actions/download-artifact@v8
+        with:
+          path: builds
+
+      - name: Rename the files
+        run: |
+          set -euo pipefail
+          find builds -type f | sort
+          mkdir dist
+          cp builds/chiaki-ng-win_x64-VC-installer.zip/chiaki-ng-windows-installer.exe "dist/RemotePlay-${TAG}-Windows-Setup.exe"
+          cp builds/chiaki-ng-win_x64-VC-Release/*.zip "dist/RemotePlay-${TAG}-Windows-Portable.zip"
+          cp builds/chiaki-ng-macos_arm64-Release/chiaki-ng.dmg "dist/RemotePlay-${TAG}-macOS-AppleSilicon.dmg"
+          cp builds/chiaki-ng.AppImage_x86_64/chiaki-ng.AppImage "dist/RemotePlay-${TAG}-Linux-x86_64.AppImage"
+          cd dist && sha256sum * > SHA256SUMS.txt && ls -la
+
+      - name: Write the release notes
+        run: |
+          cat > notes.md <<EOF
+          ## Downloads
+
+          | System | File |
+          |---|---|
+          | **Windows 10 / 11** (installer) | \`RemotePlay-${TAG}-Windows-Setup.exe\` |
+          | **Windows 10 / 11** (portable, no install) | \`RemotePlay-${TAG}-Windows-Portable.zip\` |
+          | **macOS 15+ on Apple Silicon** (M1, M2, M3, M4…) | \`RemotePlay-${TAG}-macOS-AppleSilicon.dmg\` |
+          | **Linux** (x86-64) | \`RemotePlay-${TAG}-Linux-x86_64.AppImage\` |
+
+          ## First launch
+
+          These builds are not code-signed, so the system warns you the first time:
+
+          - **Windows:** "Windows protected your PC" → **More info** → **Run anyway**.
+          - **macOS:** open the .dmg, drag the app to **Applications**, then **right-click → Open** (or allow it in *System Settings → Privacy & Security*).
+          - **Linux:** \`chmod +x RemotePlay-*.AppImage\`, then run it.
+
+          ## Recommended settings
+
+          1080p · 60 fps · H265 · 10 Mbps on Wi-Fi (15 Mbps on cable) · Vulkan renderer.
+          See the [README](https://github.com/${GH_REPO}#recommended-settings-for-smooth-play) for details and network tips.
+
+          Built from commit ${GITHUB_SHA}. Based on chiaki-ng, AGPL-3.0.
+          EOF
+
+      - name: Create the release
+        run: |
+          gh release create "$TAG" dist/* \
+            --target "$GITHUB_SHA" \
+            --title "Remote Play $TAG" \
+            --notes-file notes.md
