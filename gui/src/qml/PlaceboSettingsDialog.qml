@@ -33,6 +33,26 @@ DialogView {
     Item {
         TabBar {
             id: bar
+            background: Item {
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: 1
+                    color: Qt.rgba(1, 1, 1, 0.10)
+                }
+                // pill that glides to the selected tab
+                Rectangle {
+                    y: 6
+                    height: parent.height - 12
+                    x: bar.count ? bar.currentIndex * (bar.width / bar.count) + 6 : 0
+                    width: bar.count ? bar.width / bar.count - 12 : 0
+                    radius: height / 2
+                    color: Qt.rgba(1, 1, 1, 0.10)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.14)
+                    Behavior on x { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                    Behavior on width { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                }
+            }
             anchors {
                 top: parent.top
                 left: parent.left
@@ -82,6 +102,17 @@ DialogView {
         }
 
         StackLayout {
+            // quick fade when switching tabs
+            property int psFadeIndex: currentIndex
+            onPsFadeIndexChanged: psTabFade.restart()
+            NumberAnimation on opacity {
+                id: psTabFade
+                running: false
+                from: 0.25
+                to: 1.0
+                duration: 240
+                easing.type: Easing.OutCubic
+            }
             anchors {
                 top: bar.bottom
                 left: parent.left
@@ -199,6 +230,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(EwaLanczos)")
                     }
@@ -217,6 +250,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Chosen Upscaler)")
                     }
@@ -235,6 +270,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Hermite)")
                     }
@@ -253,6 +290,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Chosen Downscaler)")
                     }
@@ -281,6 +320,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(0.00)")
                     }
@@ -310,6 +351,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(no)")
                     }
@@ -330,6 +373,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Default)")
                         visible: Chiaki.settings.placeboDeinterlaceEnabled
@@ -351,6 +396,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Yadif)")
                         visible: Chiaki.settings.placeboDeinterlaceEnabled
@@ -371,6 +418,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(no)")
                         visible: Chiaki.settings.placeboDeinterlaceEnabled
@@ -403,6 +452,8 @@ DialogView {
 
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Checked)")
                     }
@@ -422,6 +473,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Custom)")
                         visible: Chiaki.settings.placeboDebandEnabled
@@ -453,6 +506,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(1)")
                         visible: Chiaki.settings.placeboDebandEnabled && (Chiaki.settings.placeboDebandPreset == 0)
@@ -484,6 +539,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(3.0)")
                         visible: Chiaki.settings.placeboDebandEnabled && (Chiaki.settings.placeboDebandPreset == 0)
@@ -515,6 +572,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(16.0)")
                         visible: Chiaki.settings.placeboDebandEnabled && (Chiaki.settings.placeboDebandPreset == 0)
@@ -546,6 +605,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(4.0)")
                         visible: Chiaki.settings.placeboDebandEnabled && (Chiaki.settings.placeboDebandPreset == 0)
@@ -577,6 +638,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Checked)")
                     }
@@ -596,6 +659,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Custom)")
                         visible: Chiaki.settings.placeboSigmoidEnabled
@@ -627,6 +692,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(0.75)")
                         visible: Chiaki.settings.placeboSigmoidEnabled && (Chiaki.settings.placeboSigmoidPreset == 0)
@@ -658,6 +725,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(6.5)")
                         visible: Chiaki.settings.placeboSigmoidEnabled && (Chiaki.settings.placeboSigmoidPreset == 0)
@@ -689,6 +758,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Checked)")
                     }
@@ -708,6 +779,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Custom)")
                         visible: Chiaki.settings.placeboColorAdjustmentEnabled
@@ -739,6 +812,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(0.00)")
                         visible: Chiaki.settings.placeboColorAdjustmentEnabled && (Chiaki.settings.placeboColorAdjustmentPreset == 0)
@@ -770,6 +845,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(1.0)")
                         visible: Chiaki.settings.placeboColorAdjustmentEnabled && (Chiaki.settings.placeboColorAdjustmentPreset == 0)
@@ -801,6 +878,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(1.0)")
                         visible: Chiaki.settings.placeboColorAdjustmentEnabled && (Chiaki.settings.placeboColorAdjustmentPreset == 0)
@@ -832,6 +911,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(0.00)")
                         visible: Chiaki.settings.placeboColorAdjustmentEnabled && (Chiaki.settings.placeboColorAdjustmentPreset == 0)
@@ -863,6 +944,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(1.0)")
                         visible: Chiaki.settings.placeboColorAdjustmentEnabled && (Chiaki.settings.placeboColorAdjustmentPreset == 0)
@@ -894,6 +977,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(0.000)")
                         visible: Chiaki.settings.placeboColorAdjustmentEnabled && (Chiaki.settings.placeboColorAdjustmentPreset == 0)
@@ -925,6 +1010,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Checked)")
                     }
@@ -944,6 +1031,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(High Quality)")
                         visible: Chiaki.settings.placeboPeakDetectionEnabled
@@ -975,6 +1064,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(20.0)")
                         visible: Chiaki.settings.placeboPeakDetectionEnabled && (Chiaki.settings.placeboPeakDetectionPreset == 0)
@@ -1006,6 +1097,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(1.0)")
                         visible: Chiaki.settings.placeboPeakDetectionEnabled && (Chiaki.settings.placeboPeakDetectionPreset == 0)
@@ -1037,6 +1130,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(3.0)")
                         visible: Chiaki.settings.placeboPeakDetectionEnabled && (Chiaki.settings.placeboPeakDetectionPreset == 0)
@@ -1068,6 +1163,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(99.995)")
                         visible: Chiaki.settings.placeboPeakDetectionEnabled && (Chiaki.settings.placeboPeakDetectionPreset == 0)
@@ -1099,6 +1196,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(1.0)")
                         visible: Chiaki.settings.placeboPeakDetectionEnabled && (Chiaki.settings.placeboPeakDetectionPreset == 0)
@@ -1118,6 +1217,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Unchecked)")
                         visible: Chiaki.settings.placeboPeakDetectionEnabled && (Chiaki.settings.placeboPeakDetectionPreset == 0)
@@ -1149,6 +1250,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Checked)")
                     }
@@ -1168,6 +1271,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(High Quality)")
                         visible: Chiaki.settings.placeboColorMappingEnabled

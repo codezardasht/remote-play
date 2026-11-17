@@ -54,7 +54,8 @@ Window {
     Behavior on y {
         NumberAnimation {
             id: menuAnimation
-            duration: 250
+            duration: 320
+            easing.type: Easing.OutCubic
             onRunningChanged: {
                 if (!running && !streamMenuWindow.open)
                     streamMenuWindow.closeAnimationFinished();
@@ -80,7 +81,15 @@ Window {
 
         Rectangle {
             anchors.fill: parent
-            color: "#2b2b2b"
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#e60b1d42" }
+                GradientStop { position: 1.0; color: "#f2050f26" }
+            }
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; top: parent.top }
+                height: 1
+                color: Qt.rgba(1, 1, 1, 0.14)
+            }
         }
 
         RowLayout {

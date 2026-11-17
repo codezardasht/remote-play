@@ -4,7 +4,7 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import "controls" as C
 
-Dialog {
+PSDialog {
     id: dialog
     property alias text: label.text
     property var callback
@@ -58,46 +58,17 @@ Dialog {
             Layout.alignment: Qt.AlignCenter
             spacing: 20
 
-            Button {
+            PSButton {
                 text: qsTr("Yes")
-                Material.background: Material.accent
-                flat: true
-                leftPadding: 50
                 onClicked: dialog.accept()
-                Material.roundedScale: Material.SmallScale
-
-                Image {
-                    anchors {
-                        left: parent.left
-                        verticalCenter: parent.verticalCenter
-                        leftMargin: 12
-                    }
-                    width: 28
-                    height: 28
-                    sourceSize: Qt.size(width, height)
-                    source: root.controllerButton("cross")
-                }
+                primary: true
+                glyph: root.controllerButton("cross")
             }
 
-            Button {
-                Material.background: Material.accent
+            PSButton {
                 text: qsTr("No")
-                flat: true
-                leftPadding: 50
                 onClicked: dialog.reject()
-                Material.roundedScale: Material.SmallScale
-
-                Image {
-                    anchors {
-                        left: parent.left
-                        verticalCenter: parent.verticalCenter
-                        leftMargin: 12
-                    }
-                    width: 28
-                    height: 28
-                    sourceSize: Qt.size(width, height)
-                    source: root.controllerButton("moon")
-                }
+                glyph: root.controllerButton("moon")
             }
         }
     }

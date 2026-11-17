@@ -11,7 +11,7 @@ Rectangle {
     property bool textVisible: true
     property bool registOnly: false
     property list<Item> restoreFocusItems
-    color: "black"
+    color: "transparent"
 
     StackView.onActivated: infoLabel.visible = false
 
@@ -52,6 +52,26 @@ Rectangle {
         onClicked: view.stop()
     }
 
+    Image {
+        id: connectLogo
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: infoLabel.top
+            bottomMargin: 36
+        }
+        width: 120
+        height: 120
+        sourceSize: Qt.size(240, 240)
+        source: "images/logo.svg"
+        smooth: true
+        mipmap: true
+        opacity: 0
+        scale: 0.85
+        Component.onCompleted: { opacity = 1; scale = 1 }
+        Behavior on opacity { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: 600; easing.type: Easing.OutBack } }
+    }
+
     Label {
         id: infoLabel
         anchors.centerIn: parent
@@ -72,8 +92,9 @@ Rectangle {
         BusyIndicator {
             id: spinner
             anchors.centerIn: parent
-            width: 70
+            width: 72
             height: width
+            Material.accent: "#ffffff"
         }
 
         Label {

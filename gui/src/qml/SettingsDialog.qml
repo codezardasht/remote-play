@@ -167,6 +167,26 @@ DialogView {
     Item {
         TabBar {
             id: bar
+            background: Item {
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: 1
+                    color: Qt.rgba(1, 1, 1, 0.10)
+                }
+                // pill that glides to the selected tab
+                Rectangle {
+                    y: 6
+                    height: parent.height - 12
+                    x: bar.count ? bar.currentIndex * (bar.width / bar.count) + 6 : 0
+                    width: bar.count ? bar.width / bar.count - 12 : 0
+                    radius: height / 2
+                    color: Qt.rgba(1, 1, 1, 0.10)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.14)
+                    Behavior on x { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                    Behavior on width { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                }
+            }
             anchors {
                 top: parent.top
                 left: parent.left
@@ -421,6 +441,17 @@ DialogView {
         }
 
         StackLayout {
+            // quick fade when switching tabs
+            property int psFadeIndex: currentIndex
+            onPsFadeIndexChanged: psTabFade.restart()
+            NumberAnimation on opacity {
+                id: psTabFade
+                running: false
+                from: 0.25
+                to: 1.0
+                duration: 240
+                easing.type: Easing.OutCubic
+            }
             anchors {
                 top: bar.bottom
                 left: parent.left
@@ -436,6 +467,8 @@ DialogView {
             Item {
                 // General
                 Flickable {
+                    topMargin: 16
+                    bottomMargin: 16
                     id: generalFlick
                     anchors {
                         fill: parent
@@ -449,6 +482,16 @@ DialogView {
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AlwaysOn
                         visible: generalFlick.contentHeight > generalFlick.height
+                    }
+                    Rectangle { // psCard: soft panel behind the settings
+                        x: generalLayout.x - 36
+                        y: generalLayout.y - 14
+                        width: generalLayout.width + 72
+                        height: generalLayout.height + 28
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.035)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.07)
                     }
                     ColumnLayout {
                         id: generalLayout
@@ -478,6 +521,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Ask)")
                         }
@@ -495,6 +540,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Do Nothing)")
                         }
@@ -518,6 +565,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Unchecked)")
                             visible: (typeof Chiaki.settings.steamDeckHaptics !== "undefined")
@@ -542,6 +591,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Unchecked)")
                             visible: typeof Chiaki.settings.verticalDeck !== "undefined"
@@ -560,6 +611,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Audio and Video Enabled)")
                         }
@@ -602,6 +655,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Unchecked)")
                         }
@@ -627,6 +682,8 @@ DialogView {
                         }
 
                             Label {
+                                opacity: 0.5
+                                font.pixelSize: 16
                                 Layout.alignment: Qt.AlignRight
                                 text: qsTr("(Checked)")
                             }
@@ -717,6 +774,8 @@ DialogView {
                         }
 
                             Label {
+                                opacity: 0.5
+                                font.pixelSize: 16
                                 Layout.alignment: Qt.AlignRight
                                 text: qsTr("(L1+R1+L3+R3)")
                             }
@@ -728,6 +787,8 @@ DialogView {
             Item {
                 // Video
                 Flickable {
+                    topMargin: 16
+                    bottomMargin: 16
                     id: videoFlick
                     anchors {
                         fill: parent
@@ -741,6 +802,16 @@ DialogView {
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AlwaysOn
                         visible: videoFlick.contentHeight > videoFlick.height
+                    }
+                    Rectangle { // psCard: soft panel behind the settings
+                        x: videoGrid.x - 36
+                        y: videoGrid.y - 14
+                        width: videoGrid.width + 72
+                        height: videoGrid.height + 28
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.035)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.07)
                     }
                     GridLayout {
                         id: videoGrid
@@ -789,6 +860,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Auto)")
                     }
@@ -808,6 +881,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Fullscreen)")
                     }
@@ -839,6 +914,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(1920)")
                         visible: Chiaki.settings.windowType == 1
@@ -871,6 +948,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(1080)")
                         visible: Chiaki.settings.windowType == 1
@@ -887,6 +966,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Unchecked)")
                     }
@@ -901,6 +982,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Checked)")
                     }
@@ -920,6 +1003,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Unchecked)")
                     }
@@ -947,6 +1032,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(High Quality)")
                     }
@@ -971,6 +1058,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Direct Mapping)")
                     }
@@ -989,6 +1078,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(None)")
                     }
@@ -1012,6 +1103,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Vulkan)")
                     }
@@ -1029,6 +1122,8 @@ DialogView {
                     }
 
                     Label {
+                        opacity: 0.5
+                        font.pixelSize: 16
                         Layout.alignment: Qt.AlignRight
                         text: qsTr("(Unchecked)")
                         visible: Chiaki.settings.rendererBackend == 0
@@ -1071,6 +1166,8 @@ DialogView {
             Item {
                 // Stream
                 Flickable {
+                    topMargin: 16
+                    bottomMargin: 16
                     id: streamFlick
                     anchors {
                         fill: parent
@@ -1084,6 +1181,16 @@ DialogView {
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AlwaysOn
                         visible: streamFlick.contentHeight > streamFlick.height
+                    }
+                    Rectangle { // psCard: soft panel behind the settings
+                        x: streamGrid.x - 36
+                        y: streamGrid.y - 14
+                        width: streamGrid.width + 72
+                        height: streamGrid.height + 28
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.035)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.07)
                     }
                     GridLayout {
                         id: streamGrid
@@ -1528,6 +1635,8 @@ DialogView {
             Item {
                 // Audio and Wifi
                 Flickable {
+                    topMargin: 16
+                    bottomMargin: 16
                     id: audiowifiFlick
                     anchors {
                         fill: parent
@@ -1542,6 +1651,16 @@ DialogView {
                         id: audiowifiScrollbar
                         policy: ScrollBar.AlwaysOn
                         visible: audiowifiFlick.contentHeight > audiowifiFlick.height
+                    }
+                    Rectangle { // psCard: soft panel behind the settings
+                        x: audiowifigrid.x - 36
+                        y: audiowifigrid.y - 14
+                        width: audiowifigrid.width + 72
+                        height: audiowifigrid.height + 28
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.035)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.07)
                     }
                     GridLayout {
                         id: audiowifigrid
@@ -1574,6 +1693,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Auto)")
                         }
@@ -1598,6 +1719,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Auto)")
                         }
@@ -1630,6 +1753,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(50 ms)")
                         }
@@ -1660,6 +1785,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(100%)")
                         }
@@ -1675,6 +1802,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Unchecked)")
                         }
@@ -1693,6 +1822,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Unchecked)")
                             visible: typeof Chiaki.settings.speechProcessing !== "undefined"
@@ -1724,6 +1855,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(6 dB)")
                             visible: if (typeof Chiaki.settings.speechProcessing !== "undefined") {Chiaki.settings.speechProcessing} else {false}
@@ -1755,6 +1888,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(30 dB)")
                             visible: if (typeof Chiaki.settings.speechProcessing !== "undefined") {Chiaki.settings.speechProcessing} else {false}
@@ -1784,6 +1919,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(3%)")
                         }
@@ -1812,6 +1949,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(5%)")
                         }
@@ -1827,6 +1966,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Unchecked)")
                         }
@@ -1843,6 +1984,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Unchecked)")
                         }
@@ -1853,6 +1996,8 @@ DialogView {
             Item {
                 // Consoles
                 Flickable {
+                    topMargin: 16
+                    bottomMargin: 16
                     id: consolesFlick
                     anchors {
                         fill: parent
@@ -1866,6 +2011,16 @@ DialogView {
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AlwaysOn
                         visible: consolesFlick.contentHeight > consolesFlick.height
+                    }
+                    Rectangle { // psCard: soft panel behind the settings
+                        x: consolesLayout.x - 36
+                        y: consolesLayout.y - 14
+                        width: consolesLayout.width + 72
+                        height: consolesLayout.height + 28
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.035)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.07)
                     }
                     ColumnLayout {
                         id: consolesLayout
@@ -2180,6 +2335,8 @@ DialogView {
                 // Keys
                 id: controllerMapping
                 Flickable {
+                    topMargin: 16
+                    bottomMargin: 16
                     id: keysFlick
                     anchors {
                         fill: parent
@@ -2203,6 +2360,16 @@ DialogView {
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AlwaysOn
                         visible: keysFlick.contentHeight > keysFlick.height
+                    }
+                    Rectangle { // psCard: soft panel behind the settings
+                        x: keysGrid.x - 36
+                        y: keysGrid.y - 14
+                        width: keysGrid.width + 72
+                        height: keysGrid.height + 28
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.035)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.07)
                     }
                     GridLayout {
                         id: keysGrid
@@ -2524,6 +2691,8 @@ DialogView {
             Item {
                 // Controllers
                 Flickable {
+                    topMargin: 16
+                    bottomMargin: 16
                     id: controllersFlick
                     anchors {
                         fill: parent
@@ -2538,6 +2707,16 @@ DialogView {
                         id: controllersScrollbar
                         policy: ScrollBar.AlwaysOn
                         visible: controllersFlick.contentHeight > controllersFlick.height
+                    }
+                    Rectangle { // psCard: soft panel behind the settings
+                        x: controllersLayout.x - 36
+                        y: controllersLayout.y - 14
+                        width: controllersLayout.width + 72
+                        height: controllersLayout.height + 28
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.035)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.07)
                     }
                     ColumnLayout {
                         id: controllersLayout
@@ -2581,6 +2760,8 @@ DialogView {
                             }
 
                             Label {
+                                opacity: 0.5
+                                font.pixelSize: 16
                                 Layout.alignment: Qt.AlignRight
                                 text: qsTr("(Checked)")
                             }
@@ -2609,6 +2790,8 @@ DialogView {
                             }
 
                             Label {
+                                opacity: 0.5
+                                font.pixelSize: 16
                                 Layout.alignment: Qt.AlignRight
                                 text: qsTr("(Checked)")
                             }
@@ -2652,6 +2835,8 @@ DialogView {
                             }
 
                             Label {
+                                opacity: 0.5
+                                font.pixelSize: 16
                                 Layout.alignment: Qt.AlignRight
                                 Layout.leftMargin: 100
                                 text: qsTr("(0.3 mm)")
@@ -2743,6 +2928,8 @@ DialogView {
                             }
 
                             Label {
+                                opacity: 0.5
+                                font.pixelSize: 16
                                 Layout.alignment: Qt.AlignRight
                                 text: qsTr("(L1+R1+dpad Up)")
                             }
@@ -2773,6 +2960,8 @@ DialogView {
                             }
 
                             Label {
+                                opacity: 0.5
+                                font.pixelSize: 16
                                 Layout.alignment: Qt.AlignRight
                                 text: qsTr("(Unchecked)")
                             }
@@ -2794,6 +2983,8 @@ DialogView {
                             }
 
                             Label {
+                                opacity: 0.5
+                                font.pixelSize: 16
                                 Layout.alignment: Qt.AlignRight
                                 text: qsTr("(Normal)")
                             }
@@ -2831,6 +3022,8 @@ DialogView {
                             }
 
                             Label {
+                                opacity: 0.5
+                                font.pixelSize: 16
                                 Layout.alignment: Qt.AlignRight
                                 Layout.leftMargin: 250
                                 text: qsTr("(console setting)")
@@ -2843,6 +3036,8 @@ DialogView {
             Item {
                 // Remote (PSN and Hole Punching)
                 Flickable {
+                    topMargin: 16
+                    bottomMargin: 16
                     id: remoteFlick
                     anchors {
                         fill: parent
@@ -2856,6 +3051,16 @@ DialogView {
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AlwaysOn
                         visible: remoteFlick.contentHeight > remoteFlick.height
+                    }
+                    Rectangle { // psCard: soft panel behind the settings
+                        x: remoteGrid.x - 36
+                        y: remoteGrid.y - 14
+                        width: remoteGrid.width + 72
+                        height: remoteGrid.height + 28
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.035)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.07)
                     }
                     GridLayout {
                         id: remoteGrid
@@ -2917,6 +3122,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Unchecked)")
                         }
@@ -2946,6 +3153,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             Layout.leftMargin: 100
                             text: qsTr("(75)")
@@ -2977,6 +3186,8 @@ DialogView {
                         }
 
                         Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(250)")
                             Layout.leftMargin: 100
@@ -2988,6 +3199,8 @@ DialogView {
             Item {
                 // Config (Options such as Import/Export and Logging)
                 Flickable {
+                    topMargin: 16
+                    bottomMargin: 16
                     id: configFlick
                     anchors {
                         fill: parent
@@ -3001,6 +3214,16 @@ DialogView {
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AlwaysOn
                         visible: configFlick.contentHeight > configFlick.height
+                    }
+                    Rectangle { // psCard: soft panel behind the settings
+                        x: configGrid.x - 36
+                        y: configGrid.y - 14
+                        width: configGrid.width + 72
+                        height: configGrid.height + 28
+                        radius: 24
+                        color: Qt.rgba(1, 1, 1, 0.035)
+                        border.width: 1
+                        border.color: Qt.rgba(1, 1, 1, 0.07)
                     }
                     GridLayout {
                         id: configGrid

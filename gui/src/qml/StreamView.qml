@@ -144,11 +144,30 @@ Item {
     Rectangle {
         id: loadingView
         anchors.fill: parent
-        color: "black"
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#0d2a63" }
+            GradientStop { position: 0.5; color: "#081a40" }
+            GradientStop { position: 1.0; color: "#030a1c" }
+        }
         opacity: sessionError || sessionLoading || (Chiaki.settings.audioVideoDisabled & 0x02) ? 1.0 : 0.0
         visible: opacity
 
         Behavior on opacity { NumberAnimation { duration: 250 } }
+
+        Image {
+            anchors {
+                horizontalCenter: parent.horizontalCenter
+                bottom: parent.verticalCenter
+                bottomMargin: 40
+            }
+            width: 120
+            height: 120
+            sourceSize: Qt.size(240, 240)
+            source: "images/logo.svg"
+            smooth: true
+            mipmap: true
+            visible: sessionLoading
+        }
 
         Item {
             anchors {
@@ -161,8 +180,9 @@ Item {
             BusyIndicator {
                 id: spinner
                 anchors.centerIn: parent
-                width: 70
+                width: 72
                 height: width
+                Material.accent: "#ffffff"
                 visible: sessionLoading
                 running: sessionLoading
             }
@@ -341,7 +361,7 @@ Item {
                     opacity: Chiaki.session ? 1 : 0
                     visible: opacity > 0
 
-                    Behavior on opacity { NumberAnimation { duration: 250 } }
+                    Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
 
                     Label {
                         anchors {
@@ -363,7 +383,7 @@ Item {
                     opacity: Chiaki.session ? 1 : 0
                     visible: opacity > 0
 
-                    Behavior on opacity { NumberAnimation { duration: 250 } }
+                    Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
 
                     Label {
                         anchors {
@@ -386,7 +406,7 @@ Item {
                     opacity: Chiaki.session ? 1 : 0
                     visible: opacity > 0
 
-                    Behavior on opacity { NumberAnimation { duration: 250 } }
+                    Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
 
                     Label {
                         anchors {
@@ -408,7 +428,7 @@ Item {
                     opacity: Chiaki.session ? 1 : 0
                     visible: opacity > 0
 
-                    Behavior on opacity { NumberAnimation { duration: 250 } }
+                    Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
 
                     Label {
                         id: statsDroppedFramesLabel
@@ -431,7 +451,7 @@ Item {
                     opacity: Chiaki.session ? 1 : 0
                     visible: opacity > 0
 
-                    Behavior on opacity { NumberAnimation { duration: 250 } }
+                    Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
 
                     Label {
                         anchors {
@@ -463,9 +483,9 @@ Item {
                 onPaint: {
                     let ctx = getContext("2d");
                     let gradient = ctx.createLinearGradient(0, 0, 0, height);
-                    gradient.addColorStop(0.0, Qt.rgba(0.0, 0.0, 0.0, 0.0));
-                    gradient.addColorStop(0.7, Qt.rgba(0.5, 0.5, 0.5, 0.7));
-                    gradient.addColorStop(1.0, Qt.rgba(0.5, 0.5, 0.5, 0.9));
+                    gradient.addColorStop(0.0, Qt.rgba(0.02, 0.05, 0.13, 0.0));
+                    gradient.addColorStop(0.55, Qt.rgba(0.03, 0.09, 0.22, 0.80));
+                    gradient.addColorStop(1.0, Qt.rgba(0.02, 0.06, 0.16, 0.95));
                     ctx.fillStyle = gradient;
                     ctx.fillRect(0, 0, width, height);
                 }
@@ -803,7 +823,7 @@ Item {
                         opacity: parent.visible && Chiaki.session ? 1.0 : 0.0
                         visible: opacity
 
-                        Behavior on opacity { NumberAnimation { duration: 250 } }
+                        Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
 
                         Label {
                             anchors {
@@ -825,7 +845,7 @@ Item {
                         opacity: parent.visible && Chiaki.window.droppedFrames ? 1.0 : 0.0
                         visible: opacity
 
-                        Behavior on opacity { NumberAnimation { duration: 250 } }
+                        Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
 
                         Label {
                             id: droppedFramesLabel
@@ -864,7 +884,8 @@ Item {
         Behavior on y {
             NumberAnimation {
                 id: inlineMenuAnimation
-                duration: 250
+                duration: 320
+                easing.type: Easing.OutCubic
                 onRunningChanged: {
                     if (!running && !menuController.open) {
                         menuController.closing = false;

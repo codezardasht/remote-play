@@ -6,7 +6,7 @@ import "controls" as C
 
 import org.streetpea.chiaking
 
-Dialog {
+PSDialog {
     id: dialog
     property alias text: label.text
     property var remotePlay
@@ -69,67 +69,23 @@ Dialog {
             Layout.alignment: Qt.AlignCenter
             spacing: 20
 
-            Button {
+            PSButton {
                 text: qsTr("Yes")
-                Material.background: Material.accent
-                flat: true
-                leftPadding: 50
                 onClicked: dialog.accept()
-                Material.roundedScale: Material.SmallScale
-
-                Image {
-                    anchors {
-                        left: parent.left
-                        verticalCenter: parent.verticalCenter
-                        leftMargin: 12
-                    }
-                    width: 28
-                    height: 28
-                    sourceSize: Qt.size(width, height)
-                    source: root.controllerButton("cross")
-                }
+                primary: true
+                glyph: root.controllerButton("cross")
             }
 
-            Button {
-                Material.background: Material.accent
+            PSButton {
                 text: qsTr("No")
-                flat: true
-                leftPadding: 50
                 onClicked: dialog.reject()
-                Material.roundedScale: Material.SmallScale
-
-                Image {
-                    anchors {
-                        left: parent.left
-                        verticalCenter: parent.verticalCenter
-                        leftMargin: 12
-                    }
-                    width: 28
-                    height: 28
-                    sourceSize: Qt.size(width, height)
-                    source: root.controllerButton("moon")
-                }
+                glyph: root.controllerButton("moon")
             }
 
-            Button {
-                Material.background: Material.accent
+            PSButton {
                 text: qsTr("Remind Me Later")
-                flat: true
-                leftPadding: 50
                 onClicked: dialog.close()
-                Material.roundedScale: Material.SmallScale
-
-                Image {
-                    anchors {
-                        left: parent.left
-                        verticalCenter: parent.verticalCenter
-                        leftMargin: 12
-                    }
-                    width: 28
-                    height: 28
-                    sourceSize: Qt.size(width, height)
-                    source: root.controllerButton("pyramid")
-                }
+                glyph: root.controllerButton("pyramid")
             }
         }
     }

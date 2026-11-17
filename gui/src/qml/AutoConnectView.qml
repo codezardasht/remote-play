@@ -8,7 +8,7 @@ Rectangle {
     id: view
     property bool allowClose: false
     property bool textVisible: false
-    color: "black"
+    color: "transparent"
 
     function stop() {
         if (!allowClose)
@@ -39,6 +39,26 @@ Rectangle {
         onClicked: view.cancel()
     }
 
+    Image {
+        id: connectLogo
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: infoLabel.top
+            bottomMargin: 36
+        }
+        width: 120
+        height: 120
+        sourceSize: Qt.size(240, 240)
+        source: "images/logo.svg"
+        smooth: true
+        mipmap: true
+        opacity: 0
+        scale: 0.85
+        Component.onCompleted: { opacity = 1; scale = 1 }
+        Behavior on opacity { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: 600; easing.type: Easing.OutBack } }
+    }
+
     Label {
         id: infoLabel
         anchors.centerIn: parent
@@ -60,8 +80,9 @@ Rectangle {
         BusyIndicator {
             id: spinner
             anchors.centerIn: parent
-            width: 70
+            width: 72
             height: width
+            Material.accent: "#ffffff"
             running: view.visible
         }
         Label {

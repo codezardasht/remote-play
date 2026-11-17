@@ -49,73 +49,97 @@ Item {
         }
     }
 
-    ToolBar {
+    // translucent sheet so the animated backdrop glows through softly
+    Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#d90a1a3d" }
+            GradientStop { position: 1.0; color: "#f0040c20" }
+        }
+    }
+
+    Item {
         id: toolBar
         anchors {
             top: parent.top
             left: parent.left
             right: parent.right
         }
-        height: 80
+        height: 88
 
-        RowLayout {
+        PSIconButton {
+            id: backButton
             anchors {
-                fill: parent
-                leftMargin: 10
-                rightMargin: 10
-            }
-
-            Button {
-                Layout.fillHeight: true
-                Layout.preferredWidth: 100
-                flat: true
-                text: "❮"
-                focusPolicy: Qt.NoFocus
-                Material.roundedScale: Material.SmallScale
-                onClicked: {
-                    dialog.rejected();
-                    dialog.close();
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Button {
-                id: okButton
-                Layout.fillHeight: true
-                flat: true
-                padding: 30
-                font.pixelSize: 25
-                focusPolicy: Qt.NoFocus
-                Material.roundedScale: Material.SmallScale
-                onClicked: dialog.accepted()
-                icon.source: "qrc:/icons/options.svg";
-                icon.width: 50
-                icon.height: 50
-            }
-        }
-
-        Label {
-            id: titleLabel
-            anchors.centerIn: parent
-            horizontalAlignment: Qt.AlignHCenter
-            verticalAlignment: Qt.AlignVCenter
-            font.bold: true
-            font.pixelSize: 26
-        }
-
-        Label {
-            id: headerLabel
-            anchors {
-                top: parent.top
-                left: titleLabel.right
-                right: parent.right
+                left: parent.left
+                leftMargin: 28
                 verticalCenter: parent.verticalCenter
             }
-            horizontalAlignment: Qt.AlignHCenter
-            verticalAlignment: Qt.AlignVCenter
-            font.bold: true
+            iconText: "❮"
+            tip: qsTr("Back")
+            glyph: root.controllerButton("moon")
+            onClicked: {
+                dialog.rejected();
+                dialog.close();
+            }
+        }
+
+        Text {
+            id: titleLabel
+            anchors {
+                left: backButton.right
+                leftMargin: 26
+                verticalCenter: parent.verticalCenter
+            }
+            color: "#ffffff"
+            font.pixelSize: 30
+            font.weight: Font.Light
+        }
+
+        Text {
+            id: headerLabel
+            anchors {
+                left: titleLabel.right
+                right: okButton.visible ? okButton.left : parent.right
+                leftMargin: 24
+                rightMargin: 24
+                verticalCenter: parent.verticalCenter
+            }
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
+            elide: Text.ElideRight
+            color: "#9fb4d8"
             font.pixelSize: 14
+        }
+
+        PSButton {
+            id: okButton
+            anchors {
+                right: parent.right
+                rightMargin: 28
+                verticalCenter: parent.verticalCenter
+            }
+            primary: true
+            implicitHeight: 54
+            font.pixelSize: 20
+            focusPolicy: Qt.NoFocus
+            onClicked: dialog.accepted()
+            icon.source: "qrc:/icons/options.svg"
+            icon.width: 30
+            icon.height: 30
+        }
+
+        Rectangle {
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+                leftMargin: 28
+                rightMargin: 28
+            }
+            height: 1
+            color: Qt.rgba(1, 1, 1, 0.10)
         }
     }
 

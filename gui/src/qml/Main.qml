@@ -12,7 +12,10 @@ Item {
     readonly property bool preferSeparateStreamSettingsWindows: Chiaki.window.runtimeRendererBackend === 1 && Chiaki.session
     property bool useSeparateStreamSettingsWindows: false
     Material.theme: Material.Dark
-    Material.accent: "#00a7ff"
+    Material.accent: "#2f95ff"
+    Material.primary: "#0b1d3f"
+    Material.background: "#0a1733"
+    Material.foreground: "#f2f6fc"
 
     function controllerButton(name) {
         let type = "deck";
@@ -249,9 +252,11 @@ Item {
             stack.replace(stack.get(0), autoConnectViewComponent, {}, StackView.Immediate);
     }
 
-    Pane {
+    PSBackground {
         anchors.fill: parent
         visible: !Chiaki.window.hasVideo && !Chiaki.window.keepVideo
+        // pause the animation while a stream (or its loading screen) is up
+        animated: visible && !Chiaki.session
     }
 
     StackView {
@@ -261,21 +266,42 @@ Item {
         initialItem: mainViewComponent
         font.pixelSize: 20
 
-        replaceEnter: Transition {
-            PropertyAnimation {
-                property: "opacity"
-                from: 0.01
-                to: 1.0
-                duration: 200
+        // Smooth PlayStation-style transitions: pages glide and fade in, the
+        // previous page gently recedes.
+        pushEnter: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 300; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "x"; from: 60; to: 0; duration: 380; easing.type: Easing.OutCubic }
             }
         }
-
+        pushExit: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 220; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "scale"; from: 1.0; to: 0.96; duration: 300; easing.type: Easing.OutCubic }
+            }
+        }
+        popEnter: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 300; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "scale"; from: 0.96; to: 1.0; duration: 380; easing.type: Easing.OutCubic }
+            }
+        }
+        popExit: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 220; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "x"; from: 0; to: 60; duration: 300; easing.type: Easing.OutCubic }
+            }
+        }
+        replaceEnter: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 0.01; to: 1.0; duration: 320; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "scale"; from: 1.03; to: 1.0; duration: 380; easing.type: Easing.OutCubic }
+            }
+        }
         replaceExit: Transition {
-            PropertyAnimation {
-                property: "opacity"
-                from: 1.0
-                to: 0.0
-                duration: 200
+            ParallelAnimation {
+                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 240; easing.type: Easing.OutCubic }
+                NumberAnimation { property: "scale"; from: 1.0; to: 0.97; duration: 240; easing.type: Easing.OutCubic }
             }
         }
     }
@@ -288,7 +314,11 @@ Item {
         width: 1200
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
-        color: Material.background
+        color: "#f00a1733"
+        radius: 18
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.12)
+        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
         Loader {
             anchors.fill: parent
             id: placeboSettingsLoader
@@ -303,7 +333,11 @@ Item {
         height: 500
         width: 1200
         visible: opacity && !useSeparateStreamSettingsWindows
-        color: Material.background
+        color: "#f00a1733"
+        radius: 18
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.12)
+        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
         Loader {
             anchors.fill: parent
             id: displaySettingsLoader
@@ -318,7 +352,11 @@ Item {
         height: 600
         width: 1200
         visible: opacity && !useSeparateStreamSettingsWindows
-        color: Material.background
+        color: "#f00a1733"
+        radius: 18
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.12)
+        Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
         Loader {
             anchors.fill: parent
             id: colorMappingSettingsLoader
@@ -419,15 +457,19 @@ Item {
         anchors {
             bottom: parent.bottom
             horizontalCenter: parent.horizontalCenter
-            bottomMargin: 30
         }
-        color: Material.accent
-        width: errorLayout.width + 40
-        height: errorLayout.height + 20
-        radius: 8
-        opacity: errorHideTimer.running ? 0.8 : 0.0
+        color: "#f2132a57"
+        border.width: 1
+        border.color: "#5fb3ff"
+        width: errorLayout.width + 56
+        height: errorLayout.height + 28
+        radius: 18
+        opacity: errorHideTimer.running ? 1.0 : 0.0
+        visible: opacity > 0
+        anchors.bottomMargin: errorHideTimer.running ? 40 : 10
 
-        Behavior on opacity { NumberAnimation { duration: 500 } }
+        Behavior on opacity { NumberAnimation { duration: 350; easing.type: Easing.OutCubic } }
+        Behavior on anchors.bottomMargin { NumberAnimation { duration: 400; easing.type: Easing.OutBack } }
 
         ColumnLayout {
             id: errorLayout
@@ -454,7 +496,7 @@ Item {
         }
     }
 
-    Dialog {
+    PSDialog {
         id: infoDialog
         property alias text: infoDialogLabel.text
         property Item restoreFocusItem
@@ -487,25 +529,11 @@ Item {
             RowLayout {
                 Layout.alignment: Qt.AlignCenter
 
-                Button {
+                PSButton {
                     text: qsTr("OK")
-                    Material.background: Material.accent
-                    flat: true
-                    leftPadding: 50
+                    primary: true
+                    glyph: root.controllerButton("cross")
                     onClicked: infoDialog.close()
-                    Material.roundedScale: Material.SmallScale
-
-                    Image {
-                        anchors {
-                            left: parent.left
-                            verticalCenter: parent.verticalCenter
-                            leftMargin: 12
-                        }
-                        width: 28
-                        height: 28
-                        sourceSize: Qt.size(width, height)
-                        source: root.controllerButton("cross")
-                    }
                 }
             }
         }

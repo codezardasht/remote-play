@@ -22,6 +22,11 @@
     <file>ControllerMappingDialog.qml</file>
     <file>AutoConnectView.qml</file>
     <file>PsnView.qml</file>
+    <file>PSBackground.qml</file>
+    <file>PSButton.qml</file>
+    <file>PSIconButton.qml</file>
+    <file>PSDialog.qml</file>
+    <file>images/logo.svg</file>
     <file>controls/Button.qml</file>
     <file>controls/CheckBox.qml</file>
     <file>controls/ComboBox.qml</file>
