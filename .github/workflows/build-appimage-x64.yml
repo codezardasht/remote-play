@@ -3,6 +3,9 @@ name: Build chiaki-ng Appimage x86_64
 on:
   workflow_dispatch:
   workflow_call:
+  # Push to the "appimage" branch to build only the Linux AppImage (cheap test build)
+  push:
+    branches: [ appimage ]
 
 permissions:
   contents: read
