@@ -1974,20 +1974,21 @@ DialogView {
 
                         Label {
                             Layout.alignment: Qt.AlignRight
-                            text: qsTr("Show Stream Stats During Gameplay")
+                            text: qsTr("Show FPS / Stats While Playing")
                         }
 
                         C.CheckBox {
                             lastInFocusChain: true
                             checked: Chiaki.settings.showStreamStats
                             onToggled: Chiaki.settings.showStreamStats = !Chiaki.settings.showStreamStats
+                            text: qsTr("FPS, resolution, packet loss and bitrate in the top-left corner")
                         }
 
                         Label {
                             opacity: 0.5
                             font.pixelSize: 16
                             Layout.alignment: Qt.AlignRight
-                            text: qsTr("(Unchecked)")
+                            text: qsTr("(Checked)")
                         }
                     }
                 }

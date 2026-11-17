@@ -327,21 +327,20 @@ Item {
             topMargin: 18
         }
         visible: view.streamStatsVisible
-        width: hudRow.implicitWidth + 24
-        height: 34
-        radius: height / 2
-        color: Qt.rgba(0.02, 0.06, 0.15, 0.62)
-        border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.12)
+        width: hudRow.implicitWidth
+        height: hudRow.implicitHeight
+        // Fully transparent: only the text is drawn, with a thin dark outline so it stays readable on bright scenes
+        color: "transparent"
 
         Row {
             id: hudRow
-            anchors.centerIn: parent
             spacing: 14
 
             Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 width: 8; height: 8; radius: 4
+                border.width: 1
+                border.color: "#99000000"
                 color: statsHud.goodColor(statsHud.loss < 1 ? 0 : (statsHud.loss < 5 ? 1 : 2))
             }
             Text {
@@ -349,6 +348,8 @@ Item {
                 visible: statsHud.hasVideoStats
                 textFormat: Text.StyledText
                 font.pixelSize: 15
+                style: Text.Outline
+                styleColor: "#cc000000"
                 color: "#ffffff"
                 text: statsHud.hudItem(String(statsHud.fps), qsTr("FPS"),
                                        statsHud.goodColor(statsHud.fps >= 55 ? 0 : (statsHud.fps >= 40 ? 1 : 2)))
@@ -357,6 +358,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: text !== ""
                 font.pixelSize: 15
+                style: Text.Outline
+                styleColor: "#cc000000"
                 font.bold: true
                 color: "#ffffff"
                 text: statsHud.resolutionName(statsHud.frameWidth, statsHud.frameHeight)
@@ -365,6 +368,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 textFormat: Text.StyledText
                 font.pixelSize: 15
+                style: Text.Outline
+                styleColor: "#cc000000"
                 color: "#ffffff"
                 text: statsHud.hudItem(statsHud.loss.toFixed(1) + "%", qsTr("loss"),
                                        statsHud.goodColor(statsHud.loss < 1 ? 0 : (statsHud.loss < 5 ? 1 : 2)))
@@ -374,6 +379,8 @@ Item {
                 visible: statsHud.mbps > 0
                 textFormat: Text.StyledText
                 font.pixelSize: 15
+                style: Text.Outline
+                styleColor: "#cc000000"
                 color: "#ffffff"
                 text: statsHud.hudItem(statsHud.mbps.toFixed(1), qsTr("Mbps"), "#ffffff")
             }

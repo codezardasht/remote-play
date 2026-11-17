@@ -31,7 +31,7 @@ The streaming engine is unchanged chiaki-ng. Everything you see on screen has be
 | **Dialogs** | Spring-in pop-ups with a dimmed background |
 | **Settings** | Every tab redesigned: a sliding tab highlight, fade between tabs, and options grouped on cards |
 | **Connecting / loading** | Animated logo while connecting and while the stream starts |
-| **In-game stats** | Small HUD in the top-left corner while you play: FPS, resolution, packet loss and bitrate, colour-coded green / yellow / red. Turn it on with *Settings → Audio/Wifi → Show Stream Stats During Gameplay*. It's drawn inside the stream, with no pop-up window |
+| **In-game stats** | Small HUD in the top-left corner while you play: FPS, resolution, packet loss and bitrate, colour-coded green / yellow / red. Fully transparent, on by default; turn it off with *Settings → Audio/Wifi → Show FPS / Stats While Playing*. Drawn inside the stream, with no pop-up window |
 | **Logo & app icon** | New logo, used for the Windows `.exe` and installer, the macOS `.app` / `.dmg` and the Linux icon |
 
 All keyboard and controller shortcuts work as before. **Left / Right** now move between consoles on the home screen.
@@ -113,7 +113,7 @@ The Remote Play protocol goes up to **1080p at 60 fps**. These settings give the
 | Render Preset | Settings → Video | **Default** or **Fast** on integrated graphics | High Quality can drop frames on weaker GPUs |
 | Request IDR Frame on FEC Failure | Settings → Audio/Wifi | **Off** | Avoids short freezes when a packet can't be repaired |
 | Packet Loss Reported Max | Settings → Audio/Wifi | **15%** | Lets the console lower the bitrate during bad Wi-Fi moments instead of stuttering |
-| Show Stream Stats | Settings → Audio/Wifi | **On** | Shows the small FPS / resolution / packet-loss HUD while you play |
+| Show FPS / Stats While Playing | Settings → Audio/Wifi | **On** (default) | Shows the small FPS / resolution / packet-loss HUD while you play |
 
 ## Network tips
 
