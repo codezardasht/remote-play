@@ -1,6 +1,6 @@
 name: Release (Windows, macOS, Linux)
 
-# Push a tag like v1.0.0 to build all three apps and publish them as a GitHub Release.
+# Push a tag like v1.10.1-rp2 to build all three apps and publish them as a GitHub Release.
 # Or run it by hand from the Actions tab and type the tag name.
 on:
   push:
