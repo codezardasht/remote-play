@@ -1543,8 +1543,10 @@ void QmlBackend::connectToHost(int index, QString nickname)
         return;
     }
 
+    bool console_waking = false;
     if (server.discovered && server.discovery_host.state == CHIAKI_DISCOVERY_HOST_STATE_STANDBY)
     {
+        console_waking = true;
         const QString wake_host = server.GetHostAddr();
         const QByteArray wake_regist_key = server.registered_host.GetRPRegistKey();
         const bool wake_ps5 = server.IsPS5();
@@ -1565,6 +1567,26 @@ void QmlBackend::connectToHost(int index, QString nickname)
             emit hostsChanged();
         });
         wakeup_nickname = nickname;
+    }
+    else if (!server.discovered && server.duid.isEmpty() && server.registered)
+    {
+        // A manual host isn't in discovery, so whether it's in rest mode is unknown. Send a wakeup
+        // unless discovery sees it awake: a console that's already on ignores it, and one in rest
+        // mode would otherwise time out the session before it finished waking.
+        const QString host_addr = server.GetHostAddr();
+        bool awake = false;
+        for (const auto &host : discovery_manager.GetHosts())
+            if (host.host_addr == host_addr && host.state == CHIAKI_DISCOVERY_HOST_STATE_READY)
+                awake = true;
+        if (!awake)
+        {
+            try {
+                discovery_manager.SendWakeup(host_addr, server.registered_host.GetRPRegistKey(), server.IsPS5());
+                console_waking = true;
+            } catch (const Exception &e) {
+                qCWarning(chiakiGui) << "Failed to send Wakeup packet to manual host:" << e.what();
+            }
+        }
     }
 
     bool fullscreen = false, zoom = false, stretch = false;
@@ -1607,6 +1629,8 @@ void QmlBackend::connectToHost(int index, QString nickname)
                 zoom,
                 stretch);
         createSession(info);
+        if (session && console_waking)
+            session->SetConsoleWaking();
     }
     else
     {
@@ -2348,6 +2372,7 @@ void QmlBackend::updateDiscoveryHosts()
             else if(host.state == CHIAKI_DISCOVERY_HOST_STATE_STANDBY && session && session->IsConnecting())
             {
                 sendWakeup(host.host_addr, registered.GetRPRegistKey(), host.ps5);
+                session->SetConsoleWaking();
                 QString nickname = host.host_name;
                 wakeup_nickname = nickname;
                 waking_sleeping_nicknames.append(nickname);

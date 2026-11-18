@@ -295,6 +295,7 @@ class StreamSession : public QObject
 		QAtomicInteger<bool> mic_active = true;
 		QMap<Qt::Key, int> key_map;
 		QElapsedTimer connect_timer;
+		bool console_waking = false;
 
 		void StartAudioOutDrainThread();
 		void StopAudioOutDrainThread();
@@ -338,6 +339,8 @@ class StreamSession : public QObject
 
 		bool IsConnected()	{ return connected; }
 		bool IsConnecting()	{ return connect_timer.isValid(); }
+		// The console was just sent a wakeup, so keep retrying the session for longer while it boots
+		void SetConsoleWaking()	{ console_waking = true; }
 
 		void Start();
 		void Stop();

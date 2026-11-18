@@ -36,6 +36,9 @@
 #define PS5_TOUCHPAD_MAX_X 1919.0f
 #define PS5_TOUCHPAD_MAX_Y 1079.0f
 #define SESSION_RETRY_SECONDS 20
+// A console woken from rest mode takes about 30 seconds before it accepts a session
+#define SESSION_WAKING_RETRY_SECONDS 60
+#define SESSION_RETRY_DELAY_MS 1000
 #define HAPTIC_RUMBLE_MIN_STRENGTH 100
 
 #define MICROPHONE_SAMPLES 480
@@ -2390,9 +2393,10 @@ void StreamSession::Event(ChiakiEvent *event)
 			emit ConnectedChanged();
 			break;
 		case CHIAKI_EVENT_QUIT:
-			if(!connected && !holepunch_session && chiaki_quit_reason_is_error(event->quit.reason) && connect_timer.elapsed() < SESSION_RETRY_SECONDS * 1000)
+			if(!connected && !holepunch_session && chiaki_quit_reason_is_error(event->quit.reason)
+				&& connect_timer.elapsed() < (console_waking ? SESSION_WAKING_RETRY_SECONDS : SESSION_RETRY_SECONDS) * 1000)
 			{
-				QTimer::singleShot(SESSION_RETRY_SECONDS / 3, this, &StreamSession::Start);
+				QTimer::singleShot(SESSION_RETRY_DELAY_MS, this, &StreamSession::Start);
 				return;
 			}
 			connected = false;
