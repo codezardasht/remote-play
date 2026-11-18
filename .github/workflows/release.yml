@@ -39,6 +39,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - name: Check out the release notes
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/release-notes
+          path: src
+
       - name: Download the builds
         uses: actions/download-artifact@v8
         with:
@@ -57,7 +63,14 @@ jobs:
 
       - name: Write the release notes
         run: |
-          cat > notes.md <<EOF
+          # What's new for this version, from .github/release-notes/<tag>.md when there is one
+          if [ -f "src/.github/release-notes/${TAG}.md" ]; then
+            cat "src/.github/release-notes/${TAG}.md" > notes.md
+            echo >> notes.md
+          else
+            : > notes.md
+          fi
+          cat >> notes.md <<EOF
           ## Downloads
 
           | System | File |
