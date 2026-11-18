@@ -33,4 +33,12 @@ flatpak run org.flatpak.Builder \
     --ccache \
     "$WORK/build" "$WORK/$APP.yaml"
 
-echo "Installed. Commit: $(flatpak info --user --show-commit "$APP")"
+# The local build is branch "master"; if the Flathub copy ("stable") is also installed, open the local one by default
+flatpak make-current --user "$APP" master
+COMMIT=$(flatpak info --user --show-commit "$APP//master")
+# Keep the QML-on-pull override pointed at this build (see ~/.local/share/chiaki-ng-ui)
+if flatpak override --user --show "$APP" 2>/dev/null | grep -q '^CHIAKI_QML_APP_COMMIT='; then
+    flatpak override --user --env=CHIAKI_QML_APP_COMMIT="$COMMIT" "$APP"
+fi
+echo "Installed and set as default. Commit: $COMMIT"
+echo "Flathub version still available: flatpak run $APP//stable"
