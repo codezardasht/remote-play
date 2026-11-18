@@ -17,8 +17,8 @@ if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]; then
 fi
 
 mkdir -p "$WORK"
-# Patches referenced by the manifest live next to it
-cp "$REPO"/scripts/flatpak/*.patch "$WORK"/ 2>/dev/null || true
+# Patches and included manifests (python3-modules.yaml, …) are referenced relative to the manifest
+cp -r "$REPO"/scripts/flatpak/. "$WORK"/
 sed -e "s|^        url: https://github.com/chiaki-ng/chiaki-ng.git$|        url: file://$REPO|" \
     -e "s|^        branch: main$|        commit: $SHA|" \
     "$REPO/scripts/flatpak/$APP.yaml" > "$WORK/$APP.yaml"
