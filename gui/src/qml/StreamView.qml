@@ -191,9 +191,18 @@ Item {
                         setStep(base + (1 - base) * 0.6, base + (1 - base) * 0.95, 0.4, qsTr("Waiting for video"));
                     else
                         // Slow creep: a console waking from rest mode takes about 30 seconds
-                        setStep(base, base + (1 - base) * 0.55, 0.08, qsTr("Connecting to console"));
+                        setStep(base, base + (1 - base) * 0.55, 0.08,
+                                Chiaki.reconnecting ? Chiaki.reconnectMessage : qsTr("Connecting to console"));
                 }
                 onSessionConnectedChanged: updateStep()
+                Connections {
+                    target: Chiaki
+                    function onReconnectingChanged() {
+                        if (Chiaki.reconnecting)
+                            spinner.reset();
+                        spinner.updateStep();
+                    }
+                }
                 onSessionRemoteChanged: updateStep()
                 Connections {
                     target: view
@@ -330,6 +339,7 @@ Item {
         readonly property real loss: (session && isFinite(session.averagePacketLoss)) ? session.averagePacketLoss * 100 : 0
         readonly property real mbps: (session && isFinite(session.measuredBitrate)) ? session.measuredBitrate : 0
         readonly property bool remote: session ? session.remote : false
+        readonly property int pingMs: session ? session.pingMs : 0
         readonly property int framesLostTotal: (session && isFinite(session.framesLost)) ? session.framesLost : 0
         readonly property int droppedPerSecond: Chiaki.window.droppedFrames || 0
         readonly property real pendingAgeMs: isFinite(Chiaki.window.pendingFrameAge) ? Chiaki.window.pendingFrameAge * 1000 : 0
@@ -488,6 +498,17 @@ Item {
                 styleColor: "#cc000000"
                 color: "#ffffff"
                 text: statsHud.hudItem(statsHud.mbps.toFixed(1), qsTr("Mbps"), "#ffffff")
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: statsHud.pingMs > 0
+                textFormat: Text.StyledText
+                font.pixelSize: 15
+                style: Text.Outline
+                styleColor: "#cc000000"
+                color: "#ffffff"
+                text: statsHud.hudItem(String(statsHud.pingMs), qsTr("ms"),
+                                       statsHud.goodColor(statsHud.pingMs <= 30 ? 0 : (statsHud.pingMs <= 80 ? 1 : 2)))
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -1461,6 +1482,15 @@ Item {
         target: Chiaki
 
         function onSessionChanged() {
+            if (!Chiaki.session && Chiaki.reconnecting) {
+                // A new session follows; keep this view with the progress bar instead of closing
+                closeTimer.stop();
+                sessionError = false;
+                errorTitleLabel.text = "";
+                errorTextLabel.text = "";
+                sessionLoading = true;
+                return;
+            }
             if (!Chiaki.session) {
                 if (errorTitleLabel.text)
                     closeTimer.start();

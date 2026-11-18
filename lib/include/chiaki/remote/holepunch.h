@@ -259,6 +259,18 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_session_start(
 /** Discovers UPNP if available
  * @param session The Session intance.
 */
+/**
+ * Start UPnP gateway discovery in the background, so it can overlap chiaki_holepunch_session_create.
+ * Call chiaki_holepunch_upnp_discover_wait before creating the offer.
+ */
+CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_upnp_discover_start(ChiakiHolepunchSession session);
+CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_upnp_discover_wait(ChiakiHolepunchSession session);
+/**
+ * Check for a UPnP gateway ahead of a PSN connection (blocking, run it off the GUI thread). When
+ * there is none, the next PSN connections skip UPnP discovery instead of waiting for its timeout.
+ */
+CHIAKI_EXPORT void chiaki_holepunch_upnp_prewarm(ChiakiLog *log);
+/** Start and wait for UPnP discovery */
 CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_upnp_discover(ChiakiHolepunchSession session);
 
 /** Creates an OFFER session message to send via PSN.

@@ -34,6 +34,7 @@
 #include <QTimer>
 #include <QHostAddress>
 #include <QNetworkInterface>
+#include <QSettings>
 
 extern "C" {
 #include <chiaki/time.h>
@@ -215,6 +216,8 @@ static bool frame_can_use_direct_render(const AVFrame *frame, bool use_opengl_re
 }
 
 #define PSN_DEVICES_TRIES 2
+#define MAX_AUTO_RECONNECTS 3
+#define AUTO_RECONNECT_DELAY_MS 1500
 
 // True unless addr is a private IPv4/IPv6 address outside every network this device is on: a
 // console's home address can't be reached from LTE or another Wi-Fi. Host names and public
@@ -918,6 +921,7 @@ bool QmlBackend::autoConnect() const
 
 void QmlBackend::psnCancel(bool stop_thread)
 {
+    setReconnecting(false);
     session->CancelPsnConnection(stop_thread);
 }
 
@@ -930,16 +934,19 @@ void QmlBackend::checkPsnConnection(const ChiakiErrorCode &err)
             psnSessionStart();
             break;
         case CHIAKI_ERR_HOST_DOWN:
+            setReconnecting(false);
             setConnectState(PsnConnectState::ConnectFailedStart);
             teardownSession();
             setDiscoveryEnabled(true);
             break;
         case CHIAKI_ERR_HOST_UNREACH:
+            setReconnecting(false);
             setConnectState(PsnConnectState::ConnectFailedConsoleUnreachable);
             teardownSession();
             setDiscoveryEnabled(true);
             break;
         default:
+            setReconnecting(false);
             setConnectState(PsnConnectState::ConnectFailed);
             teardownSession();
             setDiscoveryEnabled(true);
@@ -995,6 +1002,8 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
     }
 
     session_info = connect_info;
+    session_info_requested = connect_info;
+    applyAdaptiveBitrate(session_info);
     window->setStreamMaxFPS(connect_info.video_profile.max_fps);
     disable_zero_copy = !settings->GetUseZeroCopy();
     {
@@ -1189,12 +1198,62 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
         if (session != session_for_connections)
             return;
 
-        if (chiaki_quit_reason_is_error(reason)) {
-            QString m = tr("Chiaki Session has quit") + ":\n" + chiaki_quit_reason_string(reason);
-            if (!reason_str.isEmpty())
-                m += "\n" + tr("Reason") + ": \"" + reason_str + "\"";
-            emit sessionError(tr("Session has quit"), m);
+        const bool is_error = chiaki_quit_reason_is_error(reason);
+        const bool was_connected = session->WasConnected();
+        const bool was_remote = session->IsRemote();
+        recordSessionQuality(session);
+
+        // Decide whether to restart instead of showing the error
+        bool restart = false;
+        bool restart_psn = false;
+        StreamSessionConnectInfo restart_info = session_info_requested;
+        if (is_error && was_connected && reconnect_attempts < MAX_AUTO_RECONNECTS
+            && (reason == CHIAKI_QUIT_REASON_STREAM_CONNECTION_UNKNOWN || reason == CHIAKI_QUIT_REASON_CTRL_UNKNOWN))
+        {
+            // The stream dropped (signal loss on LTE, Wi-Fi roaming): connect again
+            reconnect_attempts++;
+            restart = true;
+            restart_psn = was_remote;
+            reconnect_message = tr("Connection lost, reconnecting (%1 of %2) ...").arg(reconnect_attempts).arg(MAX_AUTO_RECONNECTS);
         }
+        else if (is_error && !was_connected && !was_remote && !psn_fallback_tried
+            && reason != CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_IN_USE
+            && reason != CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_CRASH)
+        {
+            // A direct connection failed: try the same console through PSN
+            PsnHost psn_host;
+            QString duid;
+            if (findPsnHost(session_console_name, &psn_host, &duid))
+            {
+                psn_fallback_tried = true;
+                restart = true;
+                restart_psn = true;
+                restart_info = StreamSessionConnectInfo(settings, psn_host.GetTarget(), QString(), QString(),
+                    QByteArray(), QByteArray(), session_info_requested.initial_login_pin, duid, false,
+                    session_info_requested.fullscreen, session_info_requested.zoom, session_info_requested.stretch);
+                reconnect_message = tr("Direct connection failed, trying through PSN ...");
+                qCInfo(chiakiGui) << "Direct connection to" << session_console_name << "failed, falling back to PSN";
+            }
+        }
+
+        if (is_error && !restart) {
+            QString title;
+            QString hint = explainConnectFailure(reason, session, &title);
+            QString m;
+            if (!hint.isEmpty())
+                m = hint;
+            else
+            {
+                title = tr("Session has quit");
+                m = tr("Chiaki Session has quit") + ":\n" + chiaki_quit_reason_string(reason);
+                if (!reason_str.isEmpty())
+                    m += "\n" + tr("Reason") + ": \"" + reason_str + "\"";
+            }
+            setReconnecting(false);
+            emit sessionError(title, m);
+        }
+        else if (!is_error)
+            setReconnecting(false);
 
         chiaki_log_mutex.lock();
         chiaki_log_ctx = nullptr;
@@ -1206,11 +1265,27 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
             logged_hw_transfer_failures.clear();
         }
 
+        if (restart)
+        {
+            // Set before the session goes away, so the stream view shows the reconnect instead of closing
+            setReconnecting(true);
+        }
         teardownSession();
         emit sessionChanged(session);
 
         sleep_inhibit->release();
         setDiscoveryEnabled(true);
+        if (restart)
+        {
+            QTimer::singleShot(AUTO_RECONNECT_DELAY_MS, this, [this, restart_info, restart_psn] {
+                if (session || !reconnecting_state)
+                    return;
+                if (restart_psn)
+                    startPsnSession(restart_info);
+                else
+                    createSession(restart_info);
+            });
+        }
 #ifdef Q_OS_WINDOWS
         qCInfo(chiakiGui) << "Checking sleep state: ";
         if(windows_wake_sleep->getWakeState() == WindowsWakeState::Awake)
@@ -1245,7 +1320,12 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
             return;
 
         if (session_for_connections->IsConnected())
+        {
             setDiscoveryEnabled(false);
+            setReconnecting(false);
+            reconnect_attempts = 0;
+            rememberConnectPath(session_console_name, session_for_connections->IsRemote());
+        }
     });
     chiaki_log_mutex.lock();
     chiaki_log_ctx = session->GetChiakiLog();
@@ -1568,6 +1648,27 @@ void QmlBackend::connectToHost(int index, QString nickname)
         return;
     }
 
+    setReconnecting(false);
+    reconnect_attempts = 0;
+    psn_fallback_tried = false;
+    session_console_name = !server.duid.isEmpty() ? server.psn_host.GetName()
+        : (server.discovered ? server.discovery_host.host_name : server.registered_host.GetServerNickname());
+
+    // On this network a direct connection failed before and PSN worked (a guest Wi-Fi that keeps
+    // devices apart, a router blocking it), so go straight to PSN instead of failing first
+    if (!server.discovered && server.duid.isEmpty() && server.registered
+        && rememberedConnectPath(session_console_name) == QLatin1String("psn"))
+    {
+        QString duid;
+        PsnHost psn_host;
+        if (findPsnHost(session_console_name, &psn_host, &duid))
+        {
+            qCInfo(chiakiGui) << "PSN worked for" << session_console_name << "on this network last time, connecting through PSN";
+            server.psn_host = psn_host;
+            server.duid = duid;
+        }
+    }
+
     // Away from home (LTE, another Wi-Fi) a manual host's local address can't be reached and the
     // session only loaded until it timed out. Connect to the same console through PSN instead.
     if (!server.discovered && server.duid.isEmpty() && server.registered
@@ -1709,37 +1810,208 @@ void QmlBackend::connectToHost(int index, QString nickname)
                 zoom,
                 stretch);
 
-        QString expiry_s = settings->GetPsnAuthTokenExpiry();
-        QString refresh = settings->GetPsnRefreshToken();
-        if(expiry_s.isEmpty() || refresh.isEmpty())
-            return;
-        QDateTime expiry = QDateTime::fromString(expiry_s, settings->GetTimeFormat());
-        // give 1 minute buffer
-        QDateTime now = QDateTime::currentDateTime().addSecs(60);
-        if(now.secsTo(expiry) < 1)
-        {
-            PSNToken *psnToken = new PSNToken(settings, this);
-            connect(psnToken, &PSNToken::PSNTokenError, this, [this](const QString &error) {
-                qCWarning(chiakiGui) << "Could not refresh token. Automatic PSN Connection Unavailable!" << error;
-            });
-            connect(psnToken, &PSNToken::UnauthorizedError, this, &QmlBackend::psnCredsExpired);
-            connect(psnToken, &PSNToken::PSNTokenSuccess, this, []() {
-                qCWarning(chiakiGui) << "PSN Remote Connection Tokens Refreshed.";
-            });
-            connect(psnToken, &PSNToken::PSNTokenSuccess, this, [this, info]() {
-                createSession(info);
-            });
-                connect(psnToken, &PSNToken::Finished, psnToken, &QObject::deleteLater);
-            QString refresh_token = settings->GetPsnRefreshToken();
-            psnToken->RefreshPsnToken(std::move(refresh_token));
-        }
-        else
-            createSession(info);
+        startPsnSession(info);
     }
+}
+
+void QmlBackend::startPsnSession(const StreamSessionConnectInfo &info)
+{
+    QString expiry_s = settings->GetPsnAuthTokenExpiry();
+    QString refresh = settings->GetPsnRefreshToken();
+    if(expiry_s.isEmpty() || refresh.isEmpty())
+        return;
+    QDateTime expiry = QDateTime::fromString(expiry_s, settings->GetTimeFormat());
+    // give 1 minute buffer
+    QDateTime now = QDateTime::currentDateTime().addSecs(60);
+    if(now.secsTo(expiry) < 1)
+    {
+        PSNToken *psnToken = new PSNToken(settings, this);
+        connect(psnToken, &PSNToken::PSNTokenError, this, [this](const QString &error) {
+            qCWarning(chiakiGui) << "Could not refresh token. Automatic PSN Connection Unavailable!" << error;
+            setReconnecting(false);
+        });
+        connect(psnToken, &PSNToken::UnauthorizedError, this, &QmlBackend::psnCredsExpired);
+        connect(psnToken, &PSNToken::PSNTokenSuccess, this, [this, info]() {
+            qCWarning(chiakiGui) << "PSN Remote Connection Tokens Refreshed.";
+            // info was made before the refresh, so it still holds the expired token
+            StreamSessionConnectInfo refreshed = info;
+            refreshed.psn_token = settings->GetPsnAuthToken();
+            createSession(refreshed);
+        });
+        connect(psnToken, &PSNToken::Finished, psnToken, &QObject::deleteLater);
+        QString refresh_token = settings->GetPsnRefreshToken();
+        psnToken->RefreshPsnToken(std::move(refresh_token));
+    }
+    else
+        createSession(info);
+}
+
+bool QmlBackend::findPsnHost(const QString &console_name, PsnHost *host_out, QString *duid_out) const
+{
+    if (console_name.isEmpty() || settings->GetPsnAuthToken().isEmpty())
+        return false;
+    for (auto it = psn_hosts.cbegin(); it != psn_hosts.cend(); ++it)
+    {
+        if (it.value().GetName() != console_name)
+            continue;
+        if (host_out)
+            *host_out = it.value();
+        if (duid_out)
+            *duid_out = it.key();
+        return true;
+    }
+    return false;
+}
+
+// Identifies the network this device is on by its first private IPv4 subnet, e.g. 192.168.10.0/24
+QString QmlBackend::currentNetworkId() const
+{
+    for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces())
+    {
+        if (!(iface.flags() & QNetworkInterface::IsUp) || (iface.flags() & QNetworkInterface::IsLoopBack)
+            || (iface.flags() & QNetworkInterface::IsPointToPoint))
+            continue;
+        for (const QNetworkAddressEntry &entry : iface.addressEntries())
+        {
+            const QHostAddress ip = entry.ip();
+            if (ip.protocol() != QAbstractSocket::IPv4Protocol || !ip.isPrivateUse() || entry.prefixLength() <= 0)
+                continue;
+            const quint32 mask = entry.prefixLength() >= 32 ? 0xffffffffu : ~((1u << (32 - entry.prefixLength())) - 1);
+            return QHostAddress(ip.toIPv4Address() & mask).toString() + "/" + QString::number(entry.prefixLength());
+        }
+    }
+    return QString();
+}
+
+static QString connectPathKey(const QString &console_name, const QString &network)
+{
+    return QStringLiteral("connect_path/") + QString(console_name).replace('/', '_') + "@" + QString(network).replace('/', '_');
+}
+
+QString QmlBackend::rememberedConnectPath(const QString &console_name) const
+{
+    const QString network = currentNetworkId();
+    if (console_name.isEmpty() || network.isEmpty())
+        return QString();
+    return QSettings().value(connectPathKey(console_name, network)).toString();
+}
+
+void QmlBackend::rememberConnectPath(const QString &console_name, bool psn)
+{
+    const QString network = currentNetworkId();
+    if (console_name.isEmpty() || network.isEmpty())
+        return;
+    QSettings().setValue(connectPathKey(console_name, network), psn ? QStringLiteral("psn") : QStringLiteral("local"));
+}
+
+// Adaptive quality: a bitrate scale per connection type, lowered after a session with heavy packet
+// loss and raised back after a clean one, so the next session starts at a bitrate the network held
+static QString qualityScaleKey(bool remote)
+{
+    return remote ? QStringLiteral("adaptive_quality/remote_scale") : QStringLiteral("adaptive_quality/local_scale");
+}
+
+void QmlBackend::applyAdaptiveBitrate(StreamSessionConnectInfo &info) const
+{
+    const bool remote = !info.duid.isEmpty();
+    const double scale = QSettings().value(qualityScaleKey(remote), 1.0).toDouble();
+    if (scale >= 0.999 || info.video_profile.bitrate == 0)
+        return;
+    const unsigned int bitrate = qMax(2000u, static_cast<unsigned int>(info.video_profile.bitrate * scale));
+    qCInfo(chiakiGui) << "Adaptive quality: starting" << (remote ? "remote" : "local") << "session at" << bitrate
+                      << "kbps instead of" << info.video_profile.bitrate << "after packet loss on earlier sessions";
+    info.video_profile.bitrate = bitrate;
+}
+
+void QmlBackend::recordSessionQuality(StreamSession *s)
+{
+    // Too short to say anything about the network
+    if (!s || !s->WasConnected() || s->GetConnectedSeconds() < 20)
+        return;
+    const bool remote = s->IsRemote();
+    const double loss = s->GetSessionMeanLoss();
+    QSettings store;
+    double scale = store.value(qualityScaleKey(remote), 1.0).toDouble();
+    const double old_scale = scale;
+    if (loss > 0.03)
+        scale = qMax(0.35, scale * 0.75);
+    else if (loss < 0.005)
+        scale = qMin(1.0, scale * 1.15);
+    if (scale != old_scale)
+    {
+        qCInfo(chiakiGui) << "Adaptive quality:" << (remote ? "remote" : "local") << "mean packet loss" << loss * 100
+                          << "% over" << s->GetConnectedSeconds() << "s, bitrate scale" << old_scale << "->" << scale;
+        store.setValue(qualityScaleKey(remote), scale);
+    }
+}
+
+// Turns a failed connect into what most likely went wrong and what to do about it
+QString QmlBackend::explainConnectFailure(ChiakiQuitReason reason, StreamSession *s, QString *title) const
+{
+    const QString host = session_info.host;
+    switch (reason)
+    {
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_IN_USE:
+            *title = tr("Console busy");
+            return tr("Another device is already using Remote Play on this console. Close it there and try again.");
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_RP_CRASH:
+            *title = tr("Console busy");
+            return tr("Remote Play on the console stopped responding. Restart the console and try again.");
+        case CHIAKI_QUIT_REASON_PSN_REGIST_FAILED:
+            *title = tr("PSN connection failed");
+            return tr("The console was found through PSN but the connection to it broke off. "
+                      "Mobile networks sometimes block this; try again, or use another network.");
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_UNKNOWN:
+        case CHIAKI_QUIT_REASON_SESSION_REQUEST_CONNECTION_REFUSED:
+            break;
+        default:
+            return QString();
+    }
+    if (s && s->IsRemote())
+        return QString();
+    if (!host.isEmpty() && !hostAddressReachableLocally(host))
+    {
+        *title = tr("Wrong network");
+        return tr("%1 is on another network than this device. Connect to the console's Wi-Fi, "
+                  "or sign in to PSN to play away from home.").arg(host);
+    }
+    if (s && s->GetConnectAttempts() > 0 && s->GetMaxAttemptMs() < 1000
+        && reason != CHIAKI_QUIT_REASON_SESSION_REQUEST_CONNECTION_REFUSED)
+    {
+        *title = tr("Blocked by a VPN or proxy");
+        return tr("Each connection attempt was refused on this device before it reached the console. "
+                  "A VPN, proxy or firewall (Proxifier, Proton VPN, Little Snitch, …) is likely blocking chiaki-ng: "
+                  "set chiaki-ng to Direct there or turn it off. On macOS also check "
+                  "System Settings > Privacy & Security > Local Network.");
+    }
+    if (s && s->IsConsoleWaking())
+    {
+        *title = tr("Console didn't wake up");
+        return tr("The console was sent a wake-up but didn't answer in time. In the console's Rest Mode settings, "
+                  "turn on \"Stay Connected to the Internet\" and \"Enable Turning On PS5 from Network\".");
+    }
+    if (reason == CHIAKI_QUIT_REASON_SESSION_REQUEST_CONNECTION_REFUSED)
+    {
+        *title = tr("Console not ready");
+        return tr("The console refused the connection. It may still be starting up, or Remote Play is turned off "
+                  "in its settings.");
+    }
+    *title = tr("Console not answering");
+    return tr("The console at %1 didn't answer. Check that it's on or in Rest Mode, and on the same network.").arg(host);
+}
+
+void QmlBackend::setReconnecting(bool value)
+{
+    if (reconnecting_state == value)
+        return;
+    reconnecting_state = value;
+    emit reconnectingChanged();
 }
 
 void QmlBackend::stopSession(bool sleep)
 {
+    // Stopping on purpose, including during a pending reconnect, must not reconnect
+    setReconnecting(false);
     if (!session)
         return;
 
@@ -2743,6 +3015,14 @@ void QmlBackend::refreshPsnToken()
     QString refresh = settings->GetPsnRefreshToken();
     if(expiry_s.isEmpty() || refresh.isEmpty())
         return;
+    // Runs at startup and after waking from sleep (the network may have changed): find out now
+    // whether there's a UPnP gateway, so a PSN connection doesn't wait for discovery to time out
+    const uint32_t log_mask = settings->GetLogLevelMask();
+    (void)QtConcurrent::run([log_mask] {
+        ChiakiLog log;
+        chiaki_log_init(&log, log_mask, chiaki_log_cb_print, nullptr);
+        chiaki_holepunch_upnp_prewarm(&log);
+    });
     QDateTime expiry = QDateTime::fromString(expiry_s, settings->GetTimeFormat());
     // give 1 minute buffer
     QDateTime now = QDateTime::currentDateTime().addSecs(60);

@@ -238,6 +238,7 @@ typedef struct chiaki_session_t
 	uint32_t mtu_in;
 	uint32_t mtu_out;
 	uint64_t rtt_us;
+	bool rtt_measured; // false when the Senkusha test failed and rtt_us is a fallback value
 	bool dontfrag;
 	ChiakiECDH ecdh;
 

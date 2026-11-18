@@ -691,6 +691,11 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 		if(packet_loss_history.size() > 10)
 			packet_loss_history.takeFirst();
 		packet_loss_history.append(session.stream_connection.congestion_control.packet_loss);
+		if(connected)
+		{
+			loss_sum += session.stream_connection.congestion_control.packet_loss;
+			loss_samples++;
+		}
 		double packet_loss = 0;
 		for(auto v : std::as_const(packet_loss_history))
 			packet_loss += v / packet_loss_history.size();
@@ -825,6 +830,8 @@ void StreamSession::Start()
 {
 	if(!connect_timer.isValid())
 		connect_timer.start();
+	attempt_timer.start();
+	connect_attempts++;
 	ChiakiErrorCode err = chiaki_session_start(&session);
 	if(err != CHIAKI_ERR_SUCCESS)
 	{
@@ -2390,9 +2397,13 @@ void StreamSession::Event(ChiakiEvent *event)
 		case CHIAKI_EVENT_CONNECTED:
 			connect_timer.invalidate();
 			connected = true;
+			ever_connected = true;
+			connected_timer.start();
 			emit ConnectedChanged();
 			break;
 		case CHIAKI_EVENT_QUIT:
+			if(!connected && attempt_timer.isValid())
+				max_attempt_ms = qMax(max_attempt_ms, attempt_timer.elapsed());
 			if(!connected && !holepunch_session && chiaki_quit_reason_is_error(event->quit.reason)
 				&& connect_timer.elapsed() < (console_waking ? SESSION_WAKING_RETRY_SECONDS : SESSION_RETRY_SECONDS) * 1000)
 			{
@@ -2766,7 +2777,8 @@ ChiakiErrorCode StreamSession::ConnectPsnConnection(QString duid, bool ps5)
 		return CHIAKI_ERR_INVALID_DATA;
 	}
 	ChiakiHolepunchConsoleType console_type = ps5 ? CHIAKI_HOLEPUNCH_CONSOLE_TYPE_PS5 : CHIAKI_HOLEPUNCH_CONSOLE_TYPE_PS4;
-	ChiakiErrorCode err = chiaki_holepunch_upnp_discover(holepunch_session);
+	// UPnP discovery runs while the PSN session is created; it's only needed for the offer
+	ChiakiErrorCode err = chiaki_holepunch_upnp_discover_start(holepunch_session);
 	if(err != CHIAKI_ERR_SUCCESS)
 	{
 		CHIAKI_LOGE(log, "!! Failed to run upnp discover");
@@ -2779,6 +2791,12 @@ ChiakiErrorCode StreamSession::ConnectPsnConnection(QString duid, bool ps5)
 		return err;
 	}
 	CHIAKI_LOGI(log, ">> Created session");
+	err = chiaki_holepunch_upnp_discover_wait(holepunch_session);
+	if(err != CHIAKI_ERR_SUCCESS)
+	{
+		CHIAKI_LOGE(log, "!! Failed to finish upnp discover");
+		return err;
+	}
 	err = holepunch_session_create_offer(holepunch_session);
 	if (err != CHIAKI_ERR_SUCCESS)
 	{

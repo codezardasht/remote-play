@@ -339,6 +339,8 @@ typedef struct session_t
     UPNPGatewayStatus gw_status;
     ChiakiThread upnp_thread;
     bool upnp_thread_running;
+    bool upnp_thread_joined;
+    uint64_t upnp_started_us;
 
     uint8_t data1[16];
     uint8_t data2[16];
@@ -793,6 +795,8 @@ CHIAKI_EXPORT Session* chiaki_holepunch_session_init(
     session->gw.data = NULL;
     session->gw_status = GATEWAY_STATUS_UNKNOWN;
     session->upnp_thread_running = false;
+    session->upnp_thread_joined = true;
+    session->upnp_started_us = 0;
 
     ChiakiErrorCode err;
     err = chiaki_mutex_init(&session->notif_mutex, false);
@@ -856,8 +860,68 @@ static void *upnp_discover_thread_func(void *arg)
     return NULL;
 }
 
-CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_upnp_discover(Session *session)
+// When discovery found no UPnP gateway, skip it for a while: on a network without UPnP (mobile
+// data, most hotspots) each PSN connection otherwise lost up to UPNP_DISCOVER_TIMEOUT_MS.
+#define UPNP_NOT_FOUND_CACHE_US (10ULL * 60 * 1000 * 1000)
+static ChiakiMutex upnp_cache_mutex;
+static uint64_t upnp_not_found_at_us = 0;
+
+ChiakiErrorCode chiaki_holepunch_global_init(void);
+ChiakiErrorCode chiaki_holepunch_global_init(void)
 {
+    return chiaki_mutex_init(&upnp_cache_mutex, false);
+}
+
+static void upnp_cache_lock(void)
+{
+    chiaki_mutex_lock(&upnp_cache_mutex);
+}
+
+static void upnp_cache_set_not_found(bool not_found)
+{
+    upnp_cache_lock();
+    upnp_not_found_at_us = not_found ? chiaki_time_now_monotonic_us() : 0;
+    chiaki_mutex_unlock(&upnp_cache_mutex);
+}
+
+static bool upnp_cache_recently_not_found(void)
+{
+    upnp_cache_lock();
+    bool recent = upnp_not_found_at_us != 0 && chiaki_time_now_monotonic_us() - upnp_not_found_at_us < UPNP_NOT_FOUND_CACHE_US;
+    chiaki_mutex_unlock(&upnp_cache_mutex);
+    return recent;
+}
+
+CHIAKI_EXPORT void chiaki_holepunch_upnp_prewarm(ChiakiLog *log)
+{
+    if(upnp_cache_recently_not_found())
+        return;
+    UPNPGatewayInfo gw = { 0 };
+    gw.data = calloc(1, sizeof(struct IGDdatas));
+    gw.urls = calloc(1, sizeof(struct UPNPUrls));
+    if(!gw.data || !gw.urls)
+    {
+        free(gw.data);
+        free(gw.urls);
+        return;
+    }
+    bool found = upnp_get_gateway_info(log, &gw) == CHIAKI_ERR_SUCCESS;
+    if(found)
+        FreeUPNPUrls(gw.urls);
+    free(gw.data);
+    free(gw.urls);
+    CHIAKI_LOGI(log, "UPnP prewarm: gateway %s", found ? "found" : "not found, PSN connections will skip UPnP discovery");
+    upnp_cache_set_not_found(!found);
+}
+
+CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_upnp_discover_start(Session *session)
+{
+    if(upnp_cache_recently_not_found())
+    {
+        CHIAKI_LOGI(session->log, "No UPnP gateway was found on a recent connection, skipping UPnP discovery");
+        session->gw_status = GATEWAY_STATUS_NOT_FOUND;
+        return CHIAKI_ERR_SUCCESS;
+    }
     session->gw.data = calloc(1, sizeof(struct IGDdatas));
     if(!session->gw.data)
     {
@@ -867,6 +931,7 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_upnp_discover(Session *session)
     if(!session->gw.urls)
     {
         free(session->gw.data);
+        session->gw.data = NULL;
         return CHIAKI_ERR_MEMORY;
     }
 
@@ -887,28 +952,55 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_upnp_discover(Session *session)
             free(session->gw.urls);
             session->gw.urls = NULL;
         }
+        upnp_cache_set_not_found(session->gw_status == GATEWAY_STATUS_NOT_FOUND);
+        session->upnp_thread_joined = true;
         return CHIAKI_ERR_SUCCESS;
     }
+    session->upnp_thread_joined = false;
+    session->upnp_started_us = chiaki_time_now_monotonic_us();
+    return CHIAKI_ERR_SUCCESS;
+}
 
+CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_upnp_discover_wait(Session *session)
+{
+    if(session->upnp_thread_joined)
+        return CHIAKI_ERR_SUCCESS;
+
+    // The timeout counts from the start, so the time spent on other setup meanwhile isn't waited again
     chiaki_mutex_lock(&session->state_mutex);
     while(session->upnp_thread_running)
     {
-        err = chiaki_cond_timedwait(&session->state_cond, &session->state_mutex, UPNP_DISCOVER_TIMEOUT_MS);
+        uint64_t elapsed_ms = (chiaki_time_now_monotonic_us() - session->upnp_started_us) / 1000;
+        if(elapsed_ms >= UPNP_DISCOVER_TIMEOUT_MS)
+            break;
+        ChiakiErrorCode err = chiaki_cond_timedwait(&session->state_cond, &session->state_mutex, UPNP_DISCOVER_TIMEOUT_MS - elapsed_ms);
         if(err == CHIAKI_ERR_TIMEOUT)
             break;
     }
 
     if(session->upnp_thread_running)
     {
+        session->gw_status = GATEWAY_STATUS_NOT_FOUND;
         chiaki_mutex_unlock(&session->state_mutex);
         CHIAKI_LOGW(session->log, "UPnP discovery timed out after %d ms, skipping", UPNP_DISCOVER_TIMEOUT_MS);
-        session->gw_status = GATEWAY_STATUS_NOT_FOUND;
+        upnp_cache_set_not_found(true);
         return CHIAKI_ERR_SUCCESS;
     }
+    bool not_found = session->gw_status == GATEWAY_STATUS_NOT_FOUND;
     chiaki_mutex_unlock(&session->state_mutex);
 
     chiaki_thread_join(&session->upnp_thread, NULL);
+    session->upnp_thread_joined = true;
+    upnp_cache_set_not_found(not_found);
     return CHIAKI_ERR_SUCCESS;
+}
+
+CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_upnp_discover(Session *session)
+{
+    ChiakiErrorCode err = chiaki_holepunch_upnp_discover_start(session);
+    if(err != CHIAKI_ERR_SUCCESS)
+        return err;
+    return chiaki_holepunch_upnp_discover_wait(session);
 }
 
 CHIAKI_EXPORT ChiakiErrorCode chiaki_holepunch_session_create(Session* session)
@@ -1855,11 +1947,15 @@ CHIAKI_EXPORT void chiaki_holepunch_session_fini(Session* session)
         }
     }
     stop_websocket_thread(session);
-    if(session->upnp_thread_running)
+    // Join even when it already finished: after a timeout, or a cancel between start and wait,
+    // the thread was never joined
+    if(!session->upnp_thread_joined)
     {
-        CHIAKI_LOGI(session->log, "Waiting for UPnP discovery thread to finish...");
+        if(session->upnp_thread_running)
+            CHIAKI_LOGI(session->log, "Waiting for UPnP discovery thread to finish...");
         chiaki_thread_join(&session->upnp_thread, NULL);
         session->upnp_thread_running = false;
+        session->upnp_thread_joined = true;
     }
     if(session->gw.data)
     {

@@ -77,7 +77,7 @@ Rectangle {
         anchors.centerIn: parent
         opacity: textVisible ? 1.0: 0.0
         visible: opacity
-        text: qsTr("Establishing connection with console over PSN ...")
+        text: Chiaki.reconnecting ? Chiaki.reconnectMessage : qsTr("Establishing connection with console over PSN ...")
         Behavior on opacity { NumberAnimation { duration: 250 } }
     }
 
@@ -247,6 +247,9 @@ Rectangle {
 
         function onSessionChanged() 
         {
+            // A dropped PSN session is being reconnected; the new one replaces this view
+            if (!Chiaki.session && Chiaki.reconnecting)
+                return;
             if (!Chiaki.session) {
                 if (errorTitleLabel.text)
                     failTimer.start();

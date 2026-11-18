@@ -85,6 +85,8 @@ CHIAKI_EXPORT void chiaki_aligned_free(void *ptr)
 #endif
 }
 
+ChiakiErrorCode chiaki_holepunch_global_init(void);
+
 CHIAKI_EXPORT ChiakiErrorCode chiaki_lib_init()
 {
 	unsigned int seed;
@@ -104,6 +106,10 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_lib_init()
 			return CHIAKI_ERR_NETWORK;
 	}
 #endif
+
+	ChiakiErrorCode holepunch_err = chiaki_holepunch_global_init();
+	if(holepunch_err != CHIAKI_ERR_SUCCESS)
+		return holepunch_err;
 
 	ChiakiErrorCode aia_err = chiaki_aia_init();
 	if(aia_err != CHIAKI_ERR_SUCCESS)

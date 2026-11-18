@@ -32,6 +32,8 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>For mic support, chiaki-ng requires access to your microphone.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>chiaki-ng needs local network access to find, wake and stream from your PlayStation.</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
 </dict>

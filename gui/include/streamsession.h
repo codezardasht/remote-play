@@ -155,6 +155,8 @@ class StreamSession : public QObject
 	Q_PROPERTY(QString host READ GetHost CONSTANT)
 	// Connected through PSN (remote) rather than directly on the local network
 	Q_PROPERTY(bool remote READ IsRemote CONSTANT)
+	// Round trip time the console measured when the session started (Senkusha ping test)
+	Q_PROPERTY(int pingMs READ GetPingMs NOTIFY ConnectedChanged)
 	Q_PROPERTY(bool connected READ GetConnected NOTIFY ConnectedChanged)
 	Q_PROPERTY(double measuredBitrate READ GetMeasuredBitrate NOTIFY MeasuredBitrateChanged)
 	Q_PROPERTY(double averagePacketLoss READ GetAveragePacketLoss NOTIFY AveragePacketLossChanged)
@@ -298,6 +300,14 @@ class StreamSession : public QObject
 		QMap<Qt::Key, int> key_map;
 		QElapsedTimer connect_timer;
 		bool console_waking = false;
+		// For diagnosing failed connects and for the adaptive bitrate memory
+		QElapsedTimer attempt_timer;
+		qint64 max_attempt_ms = 0;
+		int connect_attempts = 0;
+		bool ever_connected = false;
+		QElapsedTimer connected_timer;
+		double loss_sum = 0;
+		qint64 loss_samples = 0;
 
 		void StartAudioOutDrainThread();
 		void StopAudioOutDrainThread();
@@ -343,6 +353,14 @@ class StreamSession : public QObject
 		bool IsConnecting()	{ return connect_timer.isValid(); }
 		// The console was just sent a wakeup, so keep retrying the session for longer while it boots
 		void SetConsoleWaking()	{ console_waking = true; }
+		bool IsConsoleWaking() const	{ return console_waking; }
+		bool WasConnected() const	{ return ever_connected; }
+		// Longest single connect attempt: a few ms means something on this device refused it
+		qint64 GetMaxAttemptMs() const	{ return max_attempt_ms; }
+		int GetConnectAttempts() const	{ return connect_attempts; }
+		qint64 GetConnectedSeconds() const	{ return connected_timer.isValid() ? connected_timer.elapsed() / 1000 : 0; }
+		// Mean packet loss (0-1) over the whole streamed time
+		double GetSessionMeanLoss() const	{ return loss_samples ? loss_sum / loss_samples : 0; }
 
 		void Start();
 		void Stop();
@@ -353,6 +371,8 @@ class StreamSession : public QObject
 		void GoHome();
 		QString GetHost() { return host; }
 		bool IsRemote() const { return holepunch_session != nullptr; }
+		// 0 (hidden) until connected, or when the ping test failed and rtt_us is only a fallback
+		int GetPingMs() const { return connected && session.rtt_measured ? qMax(1, static_cast<int>((session.rtt_us + 500) / 1000)) : 0; }
 		bool GetConnected() { return connected; }
 		double GetMeasuredBitrate()	{ return measured_bitrate; }
 		double GetAveragePacketLoss()	{ return average_packet_loss; }

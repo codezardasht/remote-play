@@ -87,6 +87,9 @@ class QmlBackend : public QObject
     Q_PROPERTY(QVariantList hiddenHosts READ hiddenHosts NOTIFY hiddenHostsChanged)
     Q_PROPERTY(bool autoConnect READ autoConnect NOTIFY autoConnectChanged)
     Q_PROPERTY(PsnConnectState connectState READ connectState WRITE setConnectState NOTIFY connectStateChanged)
+    // A dropped or failed session is being restarted automatically (reconnect, or PSN fallback)
+    Q_PROPERTY(bool reconnecting READ reconnecting NOTIFY reconnectingChanged)
+    Q_PROPERTY(QString reconnectMessage READ reconnectMessage NOTIFY reconnectingChanged)
     Q_PROPERTY(QVariantList currentControllerMapping READ currentControllerMapping NOTIFY currentControllerMappingChanged)
     Q_PROPERTY(QString currentControllerType READ currentControllerType NOTIFY currentControllerTypeChanged)
     Q_PROPERTY(bool controllerMappingDefaultMapping READ controllerMappingDefaultMapping NOTIFY controllerMappingDefaultMappingChanged)
@@ -124,6 +127,8 @@ public:
     void refreshAuth();
 
     PsnConnectState connectState() const;
+    bool reconnecting() const { return reconnecting_state; }
+    QString reconnectMessage() const { return reconnect_message; }
     void setConnectState(PsnConnectState connect_state);
     QVariantList hosts() const;
 
@@ -223,6 +228,7 @@ signals:
     void psnConnect(StreamSession *session, const QString &duid, const bool &ps5);
     void showPsnView();
     void connectStateChanged();
+    void reconnectingChanged();
     void controllersChanged();
     void currentControllerMappingChanged();
     void currentControllerTypeChanged();
@@ -282,6 +288,15 @@ private:
     void updateStreamShortcut();
     QString getExecutable();
     void teardownSession();
+    void startPsnSession(const StreamSessionConnectInfo &info);
+    bool findPsnHost(const QString &console_name, PsnHost *host_out, QString *duid_out) const;
+    QString currentNetworkId() const;
+    QString rememberedConnectPath(const QString &console_name) const;
+    void rememberConnectPath(const QString &console_name, bool psn);
+    void applyAdaptiveBitrate(StreamSessionConnectInfo &info) const;
+    void recordSessionQuality(StreamSession *s);
+    QString explainConnectFailure(ChiakiQuitReason reason, StreamSession *s, QString *title) const;
+    void setReconnecting(bool value);
 
     Settings *settings = {};
     QmlSettings *settings_qml = {};
@@ -300,6 +315,13 @@ private:
     QHash<int, QmlController*> controllers;
     DisplayServer regist_dialog_server;
     StreamSessionConnectInfo session_info = {};
+    // session_info as requested, before adaptive quality changed it; used to restart the session
+    StreamSessionConnectInfo session_info_requested = {};
+    QString session_console_name;
+    int reconnect_attempts = 0;
+    bool psn_fallback_tried = false;
+    bool reconnecting_state = false;
+    QString reconnect_message;
     SystemdInhibit *sleep_inhibit = {};
 #ifdef Q_OS_MACOS
     MacWakeSleep *mac_wake_sleep = {};
