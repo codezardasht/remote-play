@@ -20,6 +20,11 @@ jobs:
       dep_folder: deps
       libplacebo_tag: v7.387.0
       sdl2_compat_tag: 2.32.74
+      # The runner's CMake 4 rejects cmake_minimum_required below 3.5, which some ports of the pinned
+      # vcpkg baseline still declare, so "Setup vcpkg" failed. vcpkg clears the environment for port
+      # builds, so it also has to be told to keep the override.
+      CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+      VCPKG_KEEP_ENV_VARS: CMAKE_POLICY_VERSION_MINIMUM
 
     defaults:
       run:
