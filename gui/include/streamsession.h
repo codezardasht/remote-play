@@ -153,6 +153,8 @@ class StreamSession : public QObject
 
 	Q_OBJECT
 	Q_PROPERTY(QString host READ GetHost CONSTANT)
+	// Connected through PSN (remote) rather than directly on the local network
+	Q_PROPERTY(bool remote READ IsRemote CONSTANT)
 	Q_PROPERTY(bool connected READ GetConnected NOTIFY ConnectedChanged)
 	Q_PROPERTY(double measuredBitrate READ GetMeasuredBitrate NOTIFY MeasuredBitrateChanged)
 	Q_PROPERTY(double averagePacketLoss READ GetAveragePacketLoss NOTIFY AveragePacketLossChanged)
@@ -350,6 +352,7 @@ class StreamSession : public QObject
 		void SetLoginPIN(const QString &pin);
 		void GoHome();
 		QString GetHost() { return host; }
+		bool IsRemote() const { return holepunch_session != nullptr; }
 		bool GetConnected() { return connected; }
 		double GetMeasuredBitrate()	{ return measured_bitrate; }
 		double GetAveragePacketLoss()	{ return average_packet_loss; }

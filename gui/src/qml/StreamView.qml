@@ -306,6 +306,7 @@ Item {
         readonly property int frameHeight: hasVideoStats ? Chiaki.window.streamHeight : 0
         readonly property real loss: (session && isFinite(session.averagePacketLoss)) ? session.averagePacketLoss * 100 : 0
         readonly property real mbps: (session && isFinite(session.measuredBitrate)) ? session.measuredBitrate : 0
+        readonly property bool remote: session ? session.remote : false
         readonly property int framesLostTotal: (session && isFinite(session.framesLost)) ? session.framesLost : 0
         readonly property int droppedPerSecond: Chiaki.window.droppedFrames || 0
         readonly property real pendingAgeMs: isFinite(Chiaki.window.pendingFrameAge) ? Chiaki.window.pendingFrameAge * 1000 : 0
@@ -464,6 +465,17 @@ Item {
                 styleColor: "#cc000000"
                 color: "#ffffff"
                 text: statsHud.hudItem(statsHud.mbps.toFixed(1), qsTr("Mbps"), "#ffffff")
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: !!statsHud.session
+                font.pixelSize: 15
+                style: Text.Outline
+                styleColor: "#cc000000"
+                font.bold: true
+                // Blue for a local connection, amber for remote through PSN (higher latency is expected)
+                color: statsHud.remote ? "#ffcc66" : "#7cc4ff"
+                text: statsHud.remote ? qsTr("Remote · PSN") : qsTr("Local")
             }
         }
 
