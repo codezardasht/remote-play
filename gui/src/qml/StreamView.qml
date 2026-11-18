@@ -179,7 +179,7 @@ Item {
                 width: Math.min(420, view.width * 0.6)
                 visible: sessionLoading
                 readonly property bool sessionConnected: Chiaki.session ? Chiaki.session.connected : false
-                readonly property bool sessionRemote: Chiaki.session ? Chiaki.session.remote : false
+                readonly property bool sessionRemote: (Chiaki.session && Chiaki.session.remote !== undefined) ? Chiaki.session.remote : false
                 function updateStep() {
                     if (!sessionLoading) {
                         done = true;
@@ -338,8 +338,10 @@ Item {
         readonly property int frameHeight: hasVideoStats ? Chiaki.window.streamHeight : 0
         readonly property real loss: (session && isFinite(session.averagePacketLoss)) ? session.averagePacketLoss * 100 : 0
         readonly property real mbps: (session && isFinite(session.measuredBitrate)) ? session.measuredBitrate : 0
-        readonly property bool remote: session ? session.remote : false
-        readonly property int pingMs: session ? session.pingMs : 0
+        // Older app builds don't report these; then the Local/Remote label and ping stay hidden instead of guessing
+        readonly property bool hasRemoteInfo: !!session && session.remote !== undefined
+        readonly property bool remote: hasRemoteInfo ? session.remote : false
+        readonly property int pingMs: (session && isFinite(session.pingMs)) ? session.pingMs : 0
         readonly property int framesLostTotal: (session && isFinite(session.framesLost)) ? session.framesLost : 0
         readonly property int droppedPerSecond: Chiaki.window.droppedFrames || 0
         readonly property real pendingAgeMs: isFinite(Chiaki.window.pendingFrameAge) ? Chiaki.window.pendingFrameAge * 1000 : 0
@@ -512,7 +514,7 @@ Item {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                visible: !!statsHud.session
+                visible: statsHud.hasRemoteInfo
                 font.pixelSize: 15
                 style: Text.Outline
                 styleColor: "#cc000000"
