@@ -34,6 +34,8 @@
 #include <QTimer>
 #include <QHostAddress>
 #include <QNetworkInterface>
+#include <QUdpSocket>
+#include <QElapsedTimer>
 #include <QSettings>
 
 extern "C" {
@@ -219,10 +221,49 @@ static bool frame_can_use_direct_render(const AVFrame *frame, bool use_opengl_re
 #define MAX_AUTO_RECONNECTS 3
 #define AUTO_RECONNECT_DELAY_MS 1500
 
-// True unless addr is a private IPv4/IPv6 address outside every network this device is on: a
-// console's home address can't be reached from LTE or another Wi-Fi. Host names and public
-// addresses (port forwarding) count as reachable, since only a connection attempt can tell.
-static bool hostAddressReachableLocally(const QString &addr)
+// Asks the console directly with a discovery request (the console answers it even in rest mode).
+// Works across routed private networks, e.g. a home router inside a larger campus/office network.
+static bool consoleAnswersDiscovery(const QString &addr, bool ps5, int timeout_ms = 800)
+{
+    const QHostAddress host(addr);
+    if (host.isNull() || host.protocol() != QAbstractSocket::IPv4Protocol)
+        return false;
+    QUdpSocket sock;
+    if (!sock.bind(QHostAddress::AnyIPv4, 0))
+        return false;
+    const QByteArray request = QByteArray("SRCH * HTTP/1.1\ndevice-discovery-protocol-version:")
+        + (ps5 ? CHIAKI_DISCOVERY_PROTOCOL_VERSION_PS5 : CHIAKI_DISCOVERY_PROTOCOL_VERSION_PS4) + "\n";
+    const quint16 port = ps5 ? CHIAKI_DISCOVERY_PORT_PS5 : CHIAKI_DISCOVERY_PORT_PS4;
+    QElapsedTimer timer;
+    timer.start();
+    int sent = 0;
+    while (timer.elapsed() < timeout_ms)
+    {
+        // resend every ~250 ms in case one packet is lost on Wi-Fi
+        if (timer.elapsed() >= sent * 250)
+        {
+            sock.writeDatagram(request, host, port);
+            sent++;
+        }
+        if (!sock.waitForReadyRead(50))
+            continue;
+        while (sock.hasPendingDatagrams())
+        {
+            QHostAddress sender;
+            QByteArray reply(static_cast<int>(sock.pendingDatagramSize()), 0);
+            sock.readDatagram(reply.data(), reply.size(), &sender);
+            if (QHostAddress(sender.toIPv4Address()) == host)
+                return true;
+        }
+    }
+    return false;
+}
+
+// True unless addr is a private IPv4/IPv6 address that this device can't reach: a console's home
+// address can't be reached from LTE or another Wi-Fi. A private address outside this device's own
+// subnets is asked directly, since routed private networks (a home router inside a campus network)
+// still reach it. Host names and public addresses (port forwarding) count as reachable.
+static bool hostAddressReachableLocally(const QString &addr, bool ps5 = true)
 {
     QHostAddress host(addr);
     if (host.isNull() || !(host.isPrivateUse() || host.isLinkLocal()))
@@ -239,7 +280,7 @@ static bool hostAddressReachableLocally(const QString &addr)
                 return true;
         }
     }
-    return false;
+    return consoleAnswersDiscovery(addr, ps5);
 }
 #define MAX_PSN_RECONNECT_TRIES 6
 #define PSN_INTERNET_WAIT_SECONDS 5
@@ -1648,6 +1689,32 @@ void QmlBackend::connectToHost(int index, QString nickname)
         return;
     }
 
+    // PSN card, but the same console is reachable on this network (discovery off or not found yet):
+    // connect directly instead. Through PSN it would be slower, and from inside the console's own
+    // network PSN hole punching often can't connect at all.
+    if (!server.discovered && !server.duid.isEmpty())
+    {
+        const QString psn_name = server.psn_host.GetName();
+        const auto manual = settings->GetManualHosts();
+        for (int i = 0; i < manual.size(); i++)
+        {
+            const auto &manual_host = manual.at(i);
+            if (!manual_host.GetRegistered() || !settings->GetRegisteredHostRegistered(manual_host.GetMAC()))
+                continue;
+            const auto registered = settings->GetRegisteredHost(manual_host.GetMAC());
+            if (registered.GetServerNickname() != psn_name)
+                continue;
+            if (consoleAnswersDiscovery(manual_host.GetHost(), chiaki_target_is_ps5(registered.GetTarget())))
+            {
+                qCInfo(chiakiGui) << psn_name << "answers on the local network at" << manual_host.GetHost()
+                                  << "- connecting directly instead of through PSN";
+                connectToHost(discovery_manager.GetHosts().size() + i, nickname);
+                return;
+            }
+            break;
+        }
+    }
+
     setReconnecting(false);
     reconnect_attempts = 0;
     psn_fallback_tried = false;
@@ -1672,7 +1739,7 @@ void QmlBackend::connectToHost(int index, QString nickname)
     // Away from home (LTE, another Wi-Fi) a manual host's local address can't be reached and the
     // session only loaded until it timed out. Connect to the same console through PSN instead.
     if (!server.discovered && server.duid.isEmpty() && server.registered
-        && !hostAddressReachableLocally(server.GetHostAddr()))
+        && !hostAddressReachableLocally(server.GetHostAddr(), server.IsPS5()))
     {
         const QString console_name = server.registered_host.GetServerNickname();
         for (auto it = psn_hosts.cbegin(); it != psn_hosts.cend(); ++it)
