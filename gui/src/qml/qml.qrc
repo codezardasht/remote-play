@@ -22,6 +22,7 @@
     <file>ControllerMappingDialog.qml</file>
     <file>AutoConnectView.qml</file>
     <file>PsnView.qml</file>
+    <file>ConnectProgress.qml</file>
     <file>PSBackground.qml</file>
     <file>PSButton.qml</file>
     <file>PSIconButton.qml</file>

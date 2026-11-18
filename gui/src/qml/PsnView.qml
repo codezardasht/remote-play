@@ -89,12 +89,12 @@ Rectangle {
             bottom: parent.bottom
         }
 
-        BusyIndicator {
+        ConnectProgress {
             id: spinner
             anchors.centerIn: parent
-            width: 72
-            height: width
-            Material.accent: "#ffffff"
+            width: Math.min(420, view.width * 0.6)
+            // Finding the console through PSN can take close to a minute, so creep slowly
+            Component.onCompleted: setStep(0, 0.35, 0.05, qsTr("Contacting PSN"))
         }
 
         Label {
@@ -202,6 +202,7 @@ Rectangle {
             switch(Chiaki.connectState)
             {
                 case Chiaki.PsnConnectState.LinkingConsole:
+                    spinner.setStep(0.4, 0.5, 0.1, view.registOnly ? qsTr("Registering console") : qsTr("Linking with console"))
                     infoLabel.text = registOnly ? qsTr("Registering PlayStation console with chiaki-ng ...") : qsTr("Linking chiaki-ng with PlayStation console ...")
                     view.allowClose = false
                     break
@@ -209,14 +210,17 @@ Rectangle {
                     view.registOnly = true;
                     break
                 case Chiaki.PsnConnectState.RegistrationFinished:
+                    spinner.done = true
                     infoLabel.text = qsTr("Successfully registered console")
                     failTimer.restart()
                     break
                 case Chiaki.PsnConnectState.DataConnectionStart:
+                    spinner.setStep(0.5, 0.65, 0.08, qsTr("Opening data connection"))
                     infoLabel.text = qsTr("Console Linked ... Establishing data connection with console over PSN ...")
                     view.allowClose = true
                     break
                 case Chiaki.PsnConnectState.DataConnectionFinished:
+                    spinner.setStep(0.7, 0.7, 0.1, qsTr("Starting stream"))
                     view.allowClose = false
                     break
                 case Chiaki.PsnConnectState.ConnectFailed:
@@ -235,6 +239,7 @@ Rectangle {
                     failTimer.running = true
                     break
                 case Chiaki.PsnConnectState.WaitingForInternet:
+                    spinner.setStep(0, 0.1, 0.1, qsTr("Waiting for internet"))
                     infoLabel.text = qsTr("Establishing Internet Connection to PSN...")
                     break
             }

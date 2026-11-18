@@ -173,14 +173,37 @@ Item {
                 bottom: parent.bottom
             }
 
-            BusyIndicator {
+            ConnectProgress {
                 id: spinner
                 anchors.centerIn: parent
-                width: 72
-                height: width
-                Material.accent: "#ffffff"
+                width: Math.min(420, view.width * 0.6)
                 visible: sessionLoading
-                running: sessionLoading
+                readonly property bool sessionConnected: Chiaki.session ? Chiaki.session.connected : false
+                readonly property bool sessionRemote: Chiaki.session ? Chiaki.session.remote : false
+                function updateStep() {
+                    if (!sessionLoading) {
+                        done = true;
+                        return;
+                    }
+                    // Through PSN the connection screen before this one already covered 0-70%
+                    const base = sessionRemote ? 0.7 : 0;
+                    if (sessionConnected)
+                        setStep(base + (1 - base) * 0.6, base + (1 - base) * 0.95, 0.4, qsTr("Waiting for video"));
+                    else
+                        // Slow creep: a console waking from rest mode takes about 30 seconds
+                        setStep(base, base + (1 - base) * 0.55, 0.08, qsTr("Connecting to console"));
+                }
+                onSessionConnectedChanged: updateStep()
+                onSessionRemoteChanged: updateStep()
+                Connections {
+                    target: view
+                    function onSessionLoadingChanged() {
+                        if (view.sessionLoading)
+                            spinner.reset();
+                        spinner.updateStep();
+                    }
+                }
+                Component.onCompleted: updateStep()
             }
 
             Label {
