@@ -91,6 +91,23 @@ int real_main(int argc, char *argv[])
 		&& !qEnvironmentVariableIsSet("VK_ICD_FILENAMES") && !qEnvironmentVariableIsSet("VK_LOADER_DRIVERS_SELECT")
 		&& !qEnvironmentVariableIsSet("VK_LOADER_DRIVERS_DISABLE"))
 		qputenv("VK_DRIVER_FILES", QFileInfo(moltenvk_icd).canonicalFilePath().toUtf8());
+	// Qt opens the Vulkan loader by name at runtime and only searches the app's own library paths.
+	// The deployed app carries libvulkan in Frameworks, but a build run straight from the build
+	// folder links Homebrew's, which Qt can't find, so the Qt Vulkan instance failed and the app
+	// fell back to OpenGL. Point Qt at Homebrew's loader in that case.
+	const QString bundled_vulkan = QFileInfo(QString::fromLocal8Bit(argv[0])).canonicalPath()
+		+ "/../Frameworks/libvulkan.1.dylib";
+	if(!qEnvironmentVariableIsSet("QT_VULKAN_LIB") && !QFileInfo::exists(bundled_vulkan))
+	{
+		for(const char *path : {"/opt/homebrew/lib/libvulkan.1.dylib", "/usr/local/lib/libvulkan.1.dylib"})
+		{
+			if(QFileInfo::exists(path))
+			{
+				qputenv("QT_VULKAN_LIB", path);
+				break;
+			}
+		}
+	}
 #endif
 #if defined(Q_OS_LINUX)
 	if(qEnvironmentVariableIsSet("FLATPAK_ID"))
