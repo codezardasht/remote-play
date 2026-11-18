@@ -2,6 +2,7 @@
 #include <chiaki/random.h>
 #include <chiaki/thread.h>
 #include <chiaki/remote/rudpsendbuffer.h>
+#include <chiaki/time.h>
 
 #include <math.h>
 #include <string.h>
@@ -15,6 +16,8 @@
 #define RUDP_CONSTANT 0x244F244F
 #define RUDP_SEND_BUFFER_SIZE 16
 #define RUDP_EXPECT_TIMEOUT_MS 1000
+// Per attempt in chiaki_rudp_send_recv; LTE round trips with retransmits can pass a second
+#define RUDP_SEND_RECV_TIMEOUT_MS 2500
 typedef struct rudp_t
 {
     uint16_t counter;
@@ -31,6 +34,7 @@ static ChiakiErrorCode chiaki_rudp_message_parse(uint8_t *serialized_msg, size_t
 static void rudp_message_serialize(RudpMessage *message, uint8_t *serialized_msg, size_t *msg_size);
 static void print_rudp_message_type(RudpInstance *rudp, RudpPacketType type);
 static bool assign_submessage_to_message(RudpMessage *message);
+static ChiakiErrorCode rudp_select_recv_timeout(RudpInstance *rudp, size_t buf_size, RudpMessage *message, uint64_t timeout_ms);
 
 
 CHIAKI_EXPORT RudpInstance *chiaki_rudp_init(chiaki_socket_t *sock, ChiakiLog *log)
@@ -393,8 +397,13 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_raw(RudpInstance *rudp, uint8_t *
 
 CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_select_recv(RudpInstance *rudp, size_t buf_size,  RudpMessage *message)
 {
-    uint8_t buf[buf_size]; 
-	ChiakiErrorCode err = chiaki_stop_pipe_select_single(&rudp->stop_pipe, rudp->sock, false, RUDP_EXPECT_TIMEOUT_MS);
+	return rudp_select_recv_timeout(rudp, buf_size, message, RUDP_EXPECT_TIMEOUT_MS);
+}
+
+static ChiakiErrorCode rudp_select_recv_timeout(RudpInstance *rudp, size_t buf_size, RudpMessage *message, uint64_t timeout_ms)
+{
+    uint8_t buf[buf_size];
+	ChiakiErrorCode err = chiaki_stop_pipe_select_single(&rudp->stop_pipe, rudp->sock, false, timeout_ms);
 	if(err == CHIAKI_ERR_TIMEOUT || err == CHIAKI_ERR_CANCELED)
 		return err;
 	if(err != CHIAKI_ERR_SUCCESS)
@@ -453,10 +462,37 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_stop_pipe_select_single(RudpInstance *
     return CHIAKI_ERR_SUCCESS;
 }
 
+static bool rudp_message_matches(RudpMessage *message, RudpPacketType recv_type)
+{
+    switch(recv_type)
+    {
+        case INIT_RESPONSE:
+            return message->subtype == 0xD0;
+        case COOKIE_RESPONSE:
+            return message->subtype == 0xA0;
+        case CTRL_MESSAGE:
+            return (message->subtype & 0x0F) == 0x2 || (message->subtype & 0x0F) == 0x6;
+        case FINISH:
+            return message->subtype == 0xC0;
+        default:
+            return false;
+    }
+}
+
 CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_recv(RudpInstance *rudp, RudpMessage *message, uint8_t *buf, size_t buf_size, uint16_t remote_counter, RudpPacketType send_type, RudpPacketType recv_type, size_t min_data_size, size_t tries)
 {
-    bool success = false;
-    for(int i = 0; i < tries; i++)
+    switch(recv_type)
+    {
+        case INIT_RESPONSE:
+        case COOKIE_RESPONSE:
+        case CTRL_MESSAGE:
+        case FINISH:
+            break;
+        default:
+            CHIAKI_LOGE(rudp->log, "Selected RudpPacketType 0x%04x to receive that is not supported by rudp send receive.", recv_type);
+            return CHIAKI_ERR_INVALID_DATA;
+    }
+    for(size_t i = 0; i < tries; i++)
     {
         switch(send_type)
         {
@@ -476,90 +512,58 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_rudp_send_recv(RudpInstance *rudp, RudpMess
                 CHIAKI_LOGE(rudp->log, "Selected RudpPacketType 0x%04x to send that is not supported by rudp send receive.", send_type);
                 return CHIAKI_ERR_INVALID_DATA;
         }
-        ChiakiErrorCode err = chiaki_rudp_select_recv(rudp, 1500, message);
-        if(err == CHIAKI_ERR_TIMEOUT)
-            continue;
-        if(err != CHIAKI_ERR_SUCCESS)
-            return err;
-        bool found = true;
+        // Wait out the whole timeout for the expected reply. On a mobile or other high latency
+        // link the console's late reply to an earlier attempt, duplicates and its acks arrive
+        // first; resending on each of them used up every try and sent duplicate session
+        // messages, so connecting through PSN over LTE failed. Only a real timeout resends.
+        const uint64_t deadline_us = chiaki_time_now_monotonic_us() + (uint64_t)RUDP_SEND_RECV_TIMEOUT_MS * 1000;
         while(true)
         {
-            switch(recv_type)
+            const uint64_t now_us = chiaki_time_now_monotonic_us();
+            if(now_us >= deadline_us)
+                break;
+            uint64_t timeout_ms = (deadline_us - now_us + 999) / 1000;
+            ChiakiErrorCode err = rudp_select_recv_timeout(rudp, 1500, message, timeout_ms);
+            if(err == CHIAKI_ERR_TIMEOUT)
+                break;
+            if(err == CHIAKI_ERR_CANCELED)
+                return err;
+            if(err != CHIAKI_ERR_SUCCESS)
             {
-                case INIT_RESPONSE:
-                    if(message->subtype != 0xD0)
-                    {
-                        if(assign_submessage_to_message(message))
-                            continue;
-                        CHIAKI_LOGE(rudp->log, "Expected INIT RESPONSE with subtype 0xD0.\nReceived unexpected RUDP message ... retrying");
-                        chiaki_rudp_print_message(rudp, message);
-                        chiaki_rudp_message_pointers_free(message);
-                        found = false;
-                        break;
-                    }
-                    break;
-                case COOKIE_RESPONSE:
-                    if(message->subtype != 0xA0)
-                    {
-                        if(assign_submessage_to_message(message))
-                            continue;
-                        CHIAKI_LOGE(rudp->log, "Expected COOKIE RESPONSE with subtype 0xA0.\nReceived unexpected RUDP message ... retrying");
-                        chiaki_rudp_print_message(rudp, message);
-                        chiaki_rudp_message_pointers_free(message);
-                        found = false;
-                        break;
-                    }
-                    break;
-                case CTRL_MESSAGE:
-                    if((message->subtype & 0x0F) != 0x2 && (message->subtype & 0x0F) != 0x6)
-                    {
-                        if(assign_submessage_to_message(message))
-                            continue;
-                        CHIAKI_LOGE(rudp->log, "Expected CTRL MESSAGE with subtype 0x2 or 0x36.\nReceived unexpected RUDP message ... retrying");
-                        chiaki_rudp_print_message(rudp, message);
-                        chiaki_rudp_message_pointers_free(message);
-                        found = false;
-                        break;
-                    }
-                    break;
-                case FINISH:
-                    if(message->subtype != 0xC0)
-                    {
-                        if(assign_submessage_to_message(message))
-                            continue;
-                        CHIAKI_LOGE(rudp->log, "Expected FINISH MESSAGE with subtype 0xC0 .\nReceived unexpected RUDP message ... retrying");
-                        chiaki_rudp_print_message(rudp, message);
-                        chiaki_rudp_message_pointers_free(message);
-                        found = false;
-                        break;
-                    }
-                    break;
-                default:
-                    CHIAKI_LOGE(rudp->log, "Selected RudpPacketType 0x%04x to receive that is not supported by rudp send receive.", send_type);
-                    chiaki_rudp_message_pointers_free(message);
-                    return CHIAKI_ERR_INVALID_DATA;
+                // A malformed or short datagram, so keep waiting for a valid reply
+                if(err == CHIAKI_ERR_NETWORK || err == CHIAKI_ERR_INVALID_DATA || err == CHIAKI_ERR_INVALID_RESPONSE)
+                    continue;
+                return err;
             }
-            break;
+            bool found = false;
+            do
+            {
+                if(rudp_message_matches(message, recv_type))
+                {
+                    found = true;
+                    break;
+                }
+            } while(assign_submessage_to_message(message));
+            if(!found)
+            {
+                CHIAKI_LOGI(rudp->log, "Ignoring unexpected RUDP message while waiting for the reply");
+                chiaki_rudp_print_message(rudp, message);
+                chiaki_rudp_message_pointers_free(message);
+                continue;
+            }
+            if(message->data_size < min_data_size)
+            {
+                chiaki_rudp_message_pointers_free(message);
+                CHIAKI_LOGE(rudp->log, "Received message with too small of data size");
+                continue;
+            }
+            return CHIAKI_ERR_SUCCESS;
         }
-        if(!found)
-            continue;
-        if(message->data_size < min_data_size)
-        {
-            chiaki_rudp_message_pointers_free(message);
-            CHIAKI_LOGE(rudp->log, "Received message with too small of data size");
-            continue;
-        }
-        success = true;
-        break;
+        CHIAKI_LOGW(rudp->log, "No RUDP reply within %d ms, attempt %zu of %zu", RUDP_SEND_RECV_TIMEOUT_MS, i + 1, tries);
     }
-    if(success)
-        return CHIAKI_ERR_SUCCESS;
-    else
-    {
-        CHIAKI_LOGE(rudp->log, "Could not receive correct RUDP message after %llu tries", tries);
-        print_rudp_message_type(rudp, recv_type);
-        return CHIAKI_ERR_INVALID_RESPONSE;
-    }
+    CHIAKI_LOGE(rudp->log, "Could not receive correct RUDP message after %zu tries", tries);
+    print_rudp_message_type(rudp, recv_type);
+    return CHIAKI_ERR_INVALID_RESPONSE;
 }
 
 static bool assign_submessage_to_message(RudpMessage *message)

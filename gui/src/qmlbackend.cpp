@@ -32,6 +32,8 @@
 #include <QDesktopServices>
 #include <QtConcurrent>
 #include <QTimer>
+#include <QHostAddress>
+#include <QNetworkInterface>
 
 extern "C" {
 #include <chiaki/time.h>
@@ -213,6 +215,29 @@ static bool frame_can_use_direct_render(const AVFrame *frame, bool use_opengl_re
 }
 
 #define PSN_DEVICES_TRIES 2
+
+// True unless addr is a private IPv4/IPv6 address outside every network this device is on: a
+// console's home address can't be reached from LTE or another Wi-Fi. Host names and public
+// addresses (port forwarding) count as reachable, since only a connection attempt can tell.
+static bool hostAddressReachableLocally(const QString &addr)
+{
+    QHostAddress host(addr);
+    if (host.isNull() || !(host.isPrivateUse() || host.isLinkLocal()))
+        return true;
+    for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces())
+    {
+        if (!(iface.flags() & QNetworkInterface::IsUp) || (iface.flags() & QNetworkInterface::IsLoopBack))
+            continue;
+        for (const QNetworkAddressEntry &entry : iface.addressEntries())
+        {
+            if (entry.prefixLength() < 0 || entry.ip().protocol() != host.protocol())
+                continue;
+            if (host.isInSubnet(entry.ip(), entry.prefixLength()))
+                return true;
+        }
+    }
+    return false;
+}
 #define MAX_PSN_RECONNECT_TRIES 6
 #define PSN_INTERNET_WAIT_SECONDS 5
 #define WAKEUP_PSN_IGNORE_SECONDS 10
@@ -1541,6 +1566,42 @@ void QmlBackend::connectToHost(int index, QString nickname)
         regist_dialog_server = server;
         emit registDialogRequested(server.GetHostAddr(), server.IsPS5(), server.duid);
         return;
+    }
+
+    // Away from home (LTE, another Wi-Fi) a manual host's local address can't be reached and the
+    // session only loaded until it timed out. Connect to the same console through PSN instead.
+    if (!server.discovered && server.duid.isEmpty() && server.registered
+        && !hostAddressReachableLocally(server.GetHostAddr()))
+    {
+        const QString console_name = server.registered_host.GetServerNickname();
+        for (auto it = psn_hosts.cbegin(); it != psn_hosts.cend(); ++it)
+        {
+            if (it.value().GetName() != console_name)
+                continue;
+            qCInfo(chiakiGui) << "Console address" << server.GetHostAddr()
+                              << "isn't on this network, connecting to" << console_name << "through PSN";
+            server.psn_host = it.value();
+            server.duid = it.key();
+            break;
+        }
+        if (server.duid.isEmpty())
+        {
+            window->setWindowAdjustable(true);
+            if (settings->GetPsnAuthToken().isEmpty())
+                emit error(tr("Console not reachable"),
+                           tr("%1 is a local address and this device isn't on the console's network.\n"
+                              "To play away from home, sign in to PSN under Settings > Config so chiaki-ng can connect through PSN.")
+                               .arg(server.GetHostAddr()));
+            else
+            {
+                updatePsnHosts();
+                emit error(tr("Console not reachable"),
+                           tr("%1 is a local address and this device isn't on the console's network, "
+                              "and PSN hasn't listed %2 yet.\nTry again in a few seconds, and check that Remote Play is enabled on the console.")
+                               .arg(server.GetHostAddr(), console_name));
+            }
+            return;
+        }
     }
 
     bool console_waking = false;
