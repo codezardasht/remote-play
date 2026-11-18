@@ -12,6 +12,66 @@ Item {
 
     readonly property int cardWidth: Math.round(Math.min(320, Math.max(220, width * 0.22)))
     readonly property int cardGap: 34
+
+    // PSN card pressed while the same console is saved as a local (manual) console: look for it on this
+    // network first (discovery, ~2.5 s) and connect directly if found; otherwise continue through PSN.
+    // From inside the console's own network PSN often can't connect at all, and direct is faster.
+    property string localProbeName: ""
+    property string localProbeDuid: ""
+
+    function startPreferringLocal(name, duid, psnIndex) {
+        const hosts = Chiaki.hosts;
+        let savedLocally = false;
+        for (let i = 0; i < hosts.length; i++)
+            if (hosts[i].manual && hosts[i].registered && hosts[i].name === name)
+                savedLocally = true;
+        if (!savedLocally) {
+            Chiaki.connectToHost(psnIndex);
+            return;
+        }
+        localProbeName = name;
+        localProbeDuid = duid;
+        if (!Chiaki.discoveryEnabled)
+            Chiaki.discoveryEnabled = true;
+        localProbeTimer.restart();
+        finishLocalProbe(false);
+    }
+
+    function finishLocalProbe(timedOut) {
+        if (!localProbeName)
+            return;
+        const hosts = Chiaki.hosts;
+        for (let i = 0; i < hosts.length; i++) {
+            const h = hosts[i];
+            if (h.discovered && h.registered && h.name === localProbeName) {
+                localProbeName = "";
+                localProbeTimer.stop();
+                Chiaki.connectToHost(i, h.name);
+                return;
+            }
+        }
+        if (!timedOut)
+            return;
+        const duid = localProbeDuid;
+        localProbeName = "";
+        for (let i = 0; i < hosts.length; i++) {
+            if (!hosts[i].discovered && !hosts[i].manual && hosts[i].duid === duid) {
+                Chiaki.connectToHost(i);
+                return;
+            }
+        }
+    }
+
+    Timer {
+        id: localProbeTimer
+        interval: 2500
+        onTriggered: consolePane.finishLocalProbe(true)
+    }
+
+    Connections {
+        target: Chiaki
+        function onHostsChanged() { consolePane.finishLocalProbe(false) }
+    }
     readonly property int visibleHostCount: {
         let n = 0;
         const hosts = Chiaki.hosts;
@@ -301,6 +361,8 @@ Item {
             function connectToHost() {
                 if(modelData.discovered)
                     Chiaki.connectToHost(index, modelData.name);
+                else if(modelData.duid && !modelData.manual)
+                    consolePane.startPreferringLocal(modelData.name, modelData.duid, index);
                 else
                     Chiaki.connectToHost(index);
             }
@@ -748,6 +810,26 @@ Item {
             text: Qt.application.version
             color: "#6f82a8"
             font.pixelSize: 14
+        }
+    }
+
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 96
+        visible: consolePane.localProbeName !== ""
+        width: probeText.implicitWidth + 40
+        height: 44
+        radius: 22
+        color: Qt.rgba(0.04, 0.10, 0.24, 0.92)
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.18)
+        Text {
+            id: probeText
+            anchors.centerIn: parent
+            color: "#f2f6fc"
+            font.pixelSize: 16
+            text: qsTr("Looking for %1 on your network…").arg(consolePane.localProbeName)
         }
     }
 }
