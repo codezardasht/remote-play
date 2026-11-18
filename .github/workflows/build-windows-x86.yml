@@ -3,6 +3,9 @@ name: Build chiaki-ng Windows x86_64 (VC)
 on:
   workflow_dispatch:
   workflow_call:
+  # Push to the "windows" branch to build only the Windows app (test build)
+  push:
+    branches: [ windows ]
 
 permissions:
   contents: read
