@@ -2,6 +2,7 @@
 
 #include "streamsession.h"
 #include "settings.h"
+#include "subtitletranslator.h"
 
 #include <QMutex>
 #include <QAtomicInteger>
@@ -70,6 +71,7 @@ class QmlMainWindow : public QWindow
     Q_PROPERTY(int streamFps READ streamFps NOTIFY streamVideoStatsChanged)
     Q_PROPERTY(int streamWidth READ streamWidth NOTIFY streamVideoStatsChanged)
     Q_PROPERTY(int streamHeight READ streamHeight NOTIFY streamVideoStatsChanged)
+    Q_PROPERTY(SubtitleTranslator *subtitles READ subtitles CONSTANT)
 
 public:
     enum class UpdateRequestReason {
@@ -116,6 +118,7 @@ public:
     int streamFps() const { return stream_fps; }
     int streamWidth() const { return stream_width; }
     int streamHeight() const { return stream_height; }
+    SubtitleTranslator *subtitles() const { return subtitle_translator; }
     void increaseDroppedFrames();
 
     bool directStream() const;
@@ -332,6 +335,7 @@ private:
     QAtomicInteger<int> stream_frames_current = 0;
     QAtomicInteger<int> stream_width_current = 0;
     QAtomicInteger<int> stream_height_current = 0;
+    SubtitleTranslator *subtitle_translator = nullptr;
     bool going_full = false;
     VideoMode video_mode = VideoMode::Normal;
     float zoom_factor = 0;

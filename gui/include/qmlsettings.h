@@ -31,6 +31,11 @@ class QmlSettings : public QObject
     Q_PROPERTY(int echoSuppressLevel READ echoSuppressLevel WRITE setEchoSuppressLevel NOTIFY echoSuppressLevelChanged)
 #endif
     Q_PROPERTY(bool showStreamStats READ showStreamStats WRITE setShowStreamStats NOTIFY showStreamStatsChanged)
+    Q_PROPERTY(bool subtitlesEnabled READ subtitlesEnabled WRITE setSubtitlesEnabled NOTIFY subtitlesChanged)
+    Q_PROPERTY(int subtitlesLanguage READ subtitlesLanguage WRITE setSubtitlesLanguage NOTIFY subtitlesChanged)
+    Q_PROPERTY(int subtitlesModel READ subtitlesModel WRITE setSubtitlesModel NOTIFY subtitlesChanged)
+    Q_PROPERTY(bool subtitlesShowOriginal READ subtitlesShowOriginal WRITE setSubtitlesShowOriginal NOTIFY subtitlesChanged)
+    Q_PROPERTY(QString claudeApiKey READ claudeApiKey WRITE setClaudeApiKey NOTIFY subtitlesChanged)
     Q_PROPERTY(bool streamerMode READ streamerMode WRITE setStreamerMode NOTIFY streamerModeChanged)
     Q_PROPERTY(float hapticOverride READ hapticOverride WRITE setHapticOverride NOTIFY hapticOverrideChanged)
     Q_PROPERTY(int displayTargetContrast READ displayTargetContrast WRITE setDisplayTargetContrast NOTIFY displayTargetContrastChanged)
@@ -179,6 +184,16 @@ public:
 
     bool showStreamStats() const;
     void setShowStreamStats(bool enabled);
+    bool subtitlesEnabled() const;
+    void setSubtitlesEnabled(bool enabled);
+    int subtitlesLanguage() const;          // 0 = Kurdish Sorani, 1 = Arabic
+    void setSubtitlesLanguage(int index);
+    int subtitlesModel() const;             // 0 = Haiku 5.5, 1 = Sonnet 5.5, 2 = Opus 5.5
+    void setSubtitlesModel(int index);
+    bool subtitlesShowOriginal() const;
+    void setSubtitlesShowOriginal(bool enabled);
+    QString claudeApiKey() const;
+    void setClaudeApiKey(const QString &key);
 
     bool streamerMode() const;
     void setStreamerMode(bool enabled);
@@ -641,6 +656,7 @@ signals:
     void hapticOverrideChanged();
     void audioVideoDisabledChanged();
     void showStreamStatsChanged();
+    void subtitlesChanged();
     void streamerModeChanged();
     void fpsLocalPS4Changed();
     void fpsRemotePS4Changed();

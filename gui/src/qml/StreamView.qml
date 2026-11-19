@@ -327,6 +327,124 @@ Item {
         }
     }
 
+    // Live translated subtitles (Claude): the game's subtitle, read and translated into Kurdish Sorani or Arabic.
+    // Shown at the bottom on a dark band, so it covers the English line the game draws there.
+    Item {
+        id: subtitleBar
+        readonly property var translator: Chiaki.window.subtitles !== undefined ? Chiaki.window.subtitles : null
+        readonly property bool allowed: !!translator && !!Chiaki.session && !(menuController.open || menuController.closing) && !view.sessionLoading && !view.sessionError
+        property bool shown: false
+        property double shownAt: 0
+        readonly property real maxTextWidth: view.width * 0.86 - 48
+
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: parent.bottom
+            bottomMargin: Math.round(parent.height * 0.045)
+        }
+        width: Math.min(parent.width * 0.86, subtitleColumn.width + 48)
+        height: subtitleColumn.height + 20
+        visible: allowed && opacity > 0.01
+        opacity: allowed && shown && !!translator && translator.text.length > 0 ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+
+        function showLine() {
+            if (!translator || !translator.text.length) {
+                shown = false;
+                return;
+            }
+            shown = true;
+            shownAt = Date.now();
+            subtitleHideTimer.interval = Math.max(3000, Math.min(9000, 2200 + translator.text.length * 80));
+            subtitleHideTimer.restart();
+        }
+
+        Connections {
+            target: subtitleBar.translator
+            function onSubtitleChanged() { subtitleBar.showLine(); }
+            // The game's own line went away: fade ours out too, but keep it at least 1.5 s on screen
+            function onSourceCleared() {
+                if (!subtitleBar.shown)
+                    return;
+                const left = Math.max(600, 1500 - (Date.now() - subtitleBar.shownAt));
+                if (left < subtitleHideTimer.interval - (Date.now() - subtitleBar.shownAt)) {
+                    subtitleHideTimer.interval = left;
+                    subtitleHideTimer.restart();
+                }
+            }
+        }
+
+        Timer {
+            id: subtitleHideTimer
+            onTriggered: subtitleBar.shown = false
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 14
+            color: Qt.rgba(0, 0, 0, 0.62)
+        }
+
+        Column {
+            id: subtitleColumn
+            anchors.centerIn: parent
+            spacing: 4
+
+            Text {
+                width: Math.min(implicitWidth, subtitleBar.maxTextWidth)
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: text.length > 0
+                horizontalAlignment: Text.AlignHCenter
+                font.pixelSize: Math.max(14, Math.round(view.height * 0.020))
+                font.bold: true
+                color: "#7fd3ff"
+                text: subtitleBar.translator ? subtitleBar.translator.speaker : ""
+            }
+            Text {
+                id: subtitleMain
+                width: Math.min(implicitWidth, subtitleBar.maxTextWidth)
+                anchors.horizontalCenter: parent.horizontalCenter
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                // Sorani and Arabic letters (ڕ ڵ ۆ ێ ە); the system picks another font if this one is missing
+                font.family: "Noto Sans Arabic"
+                font.pixelSize: Math.max(20, Math.round(view.height * 0.034))
+                font.bold: true
+                style: Text.Outline
+                styleColor: "#cc000000"
+                color: "#ffffff"
+                text: subtitleBar.translator ? subtitleBar.translator.text : ""
+            }
+            Text {
+                width: Math.min(implicitWidth, subtitleBar.maxTextWidth)
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: Chiaki.settings.subtitlesShowOriginal && text.length > 0
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                font.pixelSize: Math.max(13, Math.round(view.height * 0.018))
+                color: "#c8ffffff"
+                text: subtitleBar.translator ? subtitleBar.translator.original : ""
+            }
+        }
+    }
+
+    // Translation problems (no key, key not accepted, no internet) in small text where the subtitles go
+    Text {
+        readonly property var translator: Chiaki.window.subtitles !== undefined ? Chiaki.window.subtitles : null
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: parent.bottom
+            bottomMargin: Math.round(parent.height * 0.015)
+        }
+        visible: !!translator && Chiaki.settings.subtitlesEnabled && !!Chiaki.session && translator.statusIsError
+                 && !(menuController.open || menuController.closing) && !view.sessionLoading && !view.sessionError
+        font.pixelSize: 15
+        style: Text.Outline
+        styleColor: "#cc000000"
+        color: "#ffd45c"
+        text: translator ? qsTr("Translation: %1").arg(translator.status) : ""
+    }
+
     // Small in-stream stats HUD (FPS, resolution, packet loss, bitrate).
     // Drawn inside the QML scene, so no extra window opens; values refresh once per second.
     Rectangle {

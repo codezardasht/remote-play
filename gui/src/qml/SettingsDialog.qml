@@ -1978,7 +1978,6 @@ DialogView {
                         }
 
                         C.CheckBox {
-                            lastInFocusChain: true
                             checked: Chiaki.settings.showStreamStats
                             onToggled: Chiaki.settings.showStreamStats = !Chiaki.settings.showStreamStats
                             text: qsTr("FPS, resolution, packet loss and bitrate in the top-left corner")
@@ -1990,6 +1989,138 @@ DialogView {
                             Layout.alignment: Qt.AlignRight
                             text: qsTr("(Checked)")
                         }
+
+                        // ---- Live subtitle translation with Claude ----
+                        Label {
+                            Layout.alignment: Qt.AlignRight
+                            Layout.topMargin: 24
+                            font.bold: true
+                            text: qsTr("Translate Subtitles")
+                        }
+
+                        C.CheckBox {
+                            Layout.topMargin: 24
+                            checked: Chiaki.settings.subtitlesEnabled
+                            onToggled: Chiaki.settings.subtitlesEnabled = !Chiaki.settings.subtitlesEnabled
+                            text: qsTr("Read the game's subtitles and show them translated (uses Claude)")
+                        }
+
+                        Label {
+                            Layout.topMargin: 24
+                            opacity: 0.5
+                            font.pixelSize: 16
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("(Unchecked)")
+                        }
+
+                        Label {
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("Translate To")
+                        }
+
+                        C.ComboBox {
+                            Layout.preferredWidth: 400
+                            model: [qsTr("Kurdish Sorani (کوردی سۆرانی)"), qsTr("Arabic (العربية)")]
+                            currentIndex: Chiaki.settings.subtitlesLanguage
+                            onActivated: index => Chiaki.settings.subtitlesLanguage = index
+                        }
+
+                        Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("(Kurdish Sorani)")
+                        }
+
+                        Label {
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("Claude Model")
+                        }
+
+                        C.ComboBox {
+                            Layout.preferredWidth: 400
+                            model: [qsTr("Claude Haiku 5.5: fastest, about $0.06 an hour"),
+                                    qsTr("Claude Sonnet 5.5: better, about $1.20 an hour"),
+                                    qsTr("Claude Opus 5.5: best, about $2.50 an hour")]
+                            currentIndex: Chiaki.settings.subtitlesModel
+                            onActivated: index => Chiaki.settings.subtitlesModel = index
+                        }
+
+                        Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("(Haiku 5.5)")
+                        }
+
+                        Label {
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("Claude API Key")
+                        }
+
+                        C.TextField {
+                            id: claudeApiKeyField
+                            Layout.preferredWidth: 400
+                            echoMode: TextInput.PasswordEchoOnEdit
+                            placeholderText: qsTr("sk-ant-… from console.anthropic.com")
+                            text: Chiaki.settings.claudeApiKey
+                            onEditingFinished: {
+                                if (text.trim() !== Chiaki.settings.claudeApiKey)
+                                    Chiaki.settings.claudeApiKey = text.trim();
+                            }
+                        }
+
+                        C.Button {
+                            lastInFocusChain: true
+                            text: qsTr("Test Key")
+                            Material.roundedScale: Material.SmallScale
+                            onClicked: {
+                                if (claudeApiKeyField.text.trim() !== Chiaki.settings.claudeApiKey)
+                                    Chiaki.settings.claudeApiKey = claudeApiKeyField.text.trim();
+                                Chiaki.window.subtitles.testApiKey();
+                            }
+                        }
+
+                        Label {
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("Show English Line")
+                        }
+
+                        C.CheckBox {
+                            checked: Chiaki.settings.subtitlesShowOriginal
+                            onToggled: Chiaki.settings.subtitlesShowOriginal = !Chiaki.settings.subtitlesShowOriginal
+                            text: qsTr("Also show the original line under the translation")
+                        }
+
+                        Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("(Unchecked)")
+                        }
+
+                        Item { implicitWidth: 1; implicitHeight: 1 }
+
+                        Label {
+                            Layout.preferredWidth: 400
+                            wrapMode: Text.WordWrap
+                            font.pixelSize: 15
+                            readonly property var translator: Chiaki.window.subtitles
+                            color: translator && translator.statusIsError ? "#ffd45c" : "#9fe0a8"
+                            text: {
+                                let lines = [];
+                                if (translator && translator.status)
+                                    lines.push(translator.status);
+                                if (translator && translator.requestCount > 0)
+                                    lines.push(qsTr("Since the app started: %1 lines, about $%2").arg(translator.requestCount).arg(translator.costUsd.toFixed(3)));
+                                if (!lines.length)
+                                    lines.push(qsTr("Get a key at console.anthropic.com → API Keys. It is billed per use, separately from a Claude.ai subscription."));
+                                return lines.join("\n");
+                            }
+                            opacity: translator && (translator.status || translator.requestCount > 0) ? 1.0 : 0.6
+                        }
+
+                        Item { implicitWidth: 1; implicitHeight: 1 }
                     }
                 }
             }

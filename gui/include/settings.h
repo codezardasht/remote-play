@@ -273,6 +273,18 @@ class Settings : public QObject
 		bool GetShowStreamStats() const            { return settings.value("settings/show_stream_stats", true).toBool(); }
 		void SetShowStreamStats(bool enabled)      { settings.setValue("settings/show_stream_stats", enabled); }
 
+		// Live subtitle translation with Claude (off by default; needs the user's own Anthropic API key)
+		bool GetSubtitlesEnabled() const           { return settings.value("settings/subtitles_enabled", false).toBool(); }
+		void SetSubtitlesEnabled(bool enabled)     { settings.setValue("settings/subtitles_enabled", enabled); }
+		QString GetSubtitlesLanguage() const       { return settings.value("settings/subtitles_language", "ckb").toString(); }
+		void SetSubtitlesLanguage(const QString &code) { settings.setValue("settings/subtitles_language", code); }
+		QString GetSubtitlesModel() const          { return settings.value("settings/subtitles_model", "claude-haiku-5-5").toString(); }
+		void SetSubtitlesModel(const QString &model) { settings.setValue("settings/subtitles_model", model); }
+		bool GetSubtitlesShowOriginal() const      { return settings.value("settings/subtitles_show_original", false).toBool(); }
+		void SetSubtitlesShowOriginal(bool enabled) { settings.setValue("settings/subtitles_show_original", enabled); }
+		QString GetClaudeApiKey() const            { return settings.value("settings/claude_api_key").toString(); }
+		void SetClaudeApiKey(const QString &key)   { settings.setValue("settings/claude_api_key", key); }
+
 		bool GetStreamerMode() const		{ return settings.value("settings/streamer_mode", false).toBool(); }
 		void SetStreamerMode(bool enabled)	{ settings.setValue("settings/streamer_mode", enabled); }
 

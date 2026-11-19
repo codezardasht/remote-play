@@ -2,6 +2,7 @@
 #include "sessionlog.h"
 
 #include <QSet>
+#include <iterator>
 #include <QKeySequence>
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
@@ -109,6 +110,76 @@ void QmlSettings::setShowStreamStats(bool enabled)
 {
     settings->SetShowStreamStats(enabled);
     emit showStreamStatsChanged();
+}
+
+static const char *const kSubtitleLanguages[] = { "ckb", "ar" };
+static const char *const kSubtitleModels[] = { "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5" };
+
+bool QmlSettings::subtitlesEnabled() const
+{
+    return settings->GetSubtitlesEnabled();
+}
+
+void QmlSettings::setSubtitlesEnabled(bool enabled)
+{
+    settings->SetSubtitlesEnabled(enabled);
+    emit subtitlesChanged();
+}
+
+int QmlSettings::subtitlesLanguage() const
+{
+    const QString code = settings->GetSubtitlesLanguage();
+    for (int i = 0; i < int(std::size(kSubtitleLanguages)); i++)
+        if (code == QLatin1String(kSubtitleLanguages[i]))
+            return i;
+    return 0;
+}
+
+void QmlSettings::setSubtitlesLanguage(int index)
+{
+    if (index < 0 || index >= int(std::size(kSubtitleLanguages)))
+        return;
+    settings->SetSubtitlesLanguage(QString::fromLatin1(kSubtitleLanguages[index]));
+    emit subtitlesChanged();
+}
+
+int QmlSettings::subtitlesModel() const
+{
+    const QString model = settings->GetSubtitlesModel();
+    for (int i = 0; i < int(std::size(kSubtitleModels)); i++)
+        if (model == QLatin1String(kSubtitleModels[i]))
+            return i;
+    return 0;
+}
+
+void QmlSettings::setSubtitlesModel(int index)
+{
+    if (index < 0 || index >= int(std::size(kSubtitleModels)))
+        return;
+    settings->SetSubtitlesModel(QString::fromLatin1(kSubtitleModels[index]));
+    emit subtitlesChanged();
+}
+
+bool QmlSettings::subtitlesShowOriginal() const
+{
+    return settings->GetSubtitlesShowOriginal();
+}
+
+void QmlSettings::setSubtitlesShowOriginal(bool enabled)
+{
+    settings->SetSubtitlesShowOriginal(enabled);
+    emit subtitlesChanged();
+}
+
+QString QmlSettings::claudeApiKey() const
+{
+    return settings->GetClaudeApiKey();
+}
+
+void QmlSettings::setClaudeApiKey(const QString &key)
+{
+    settings->SetClaudeApiKey(key.trimmed());
+    emit subtitlesChanged();
 }
 
 bool QmlSettings::streamerMode() const
@@ -1898,6 +1969,7 @@ void QmlSettings::refreshAllKeys()
     emit allowJoystickBackgroundEventsChanged();
     emit startMicUnmutedChanged();
     emit showStreamStatsChanged();
+    emit subtitlesChanged();
     emit streamerModeChanged();
 #ifdef CHIAKI_GUI_ENABLE_STEAMDECK_NATIVE
     emit verticalDeckChanged();

@@ -2878,6 +2878,8 @@ void QmlMainWindow::setVideoPreset(VideoPreset preset)
 void QmlMainWindow::setSettings(Settings *new_settings)
 {
     settings = new_settings;
+    if (subtitle_translator)
+        subtitle_translator->setSettings(new_settings);
     QString profile = settings->GetCurrentProfile();
     qCCritical(chiakiGui) << "Current Profile: " << profile;
     if(profile.isEmpty())
@@ -3024,6 +3026,9 @@ void QmlMainWindow::presentFrame(ChiakiFfmpegFrame frame, int32_t frames_lost, q
         stream_frames_current.fetchAndAddRelaxed(1);
         stream_width_current.storeRelaxed(frame.frame->width);
         stream_height_current.storeRelaxed(frame.frame->height);
+        // Live subtitle translation looks at about 3 frames a second (a new reference, not a copy)
+        if (subtitle_translator && subtitle_translator->wantsFrame())
+            subtitle_translator->submitFrame(av_frame_clone(frame.frame));
     }
 
     if (bypass_frame_queue) {
@@ -4840,6 +4845,8 @@ void QmlMainWindow::doneOpenGLContextCurrent()
 
 void QmlMainWindow::init(Settings *settings, bool exit_app_on_stream_exit)
 {
+    subtitle_translator = new SubtitleTranslator(this);
+    subtitle_translator->setSettings(settings);
     bypass_frame_queue = settings->GetDirectFrameMapping();
     render_backend = settings->GetRenderBackend();
     setSurfaceType(render_backend == RenderBackend::Vulkan ? QWindow::VulkanSurface : QWindow::OpenGLSurface);
@@ -5328,6 +5335,8 @@ renderer_backend_ready:
         }
 
         const int fps_next = stream_frames_current.fetchAndStoreRelaxed(0);
+        if (subtitle_translator)
+            subtitle_translator->refresh(session != nullptr);
         if (!session) {
             stream_width_current.storeRelaxed(0);
             stream_height_current.storeRelaxed(0);
