@@ -175,43 +175,63 @@ class SubtitleTranslator(
 	@Volatile private var copyBusy = false
 	@Volatile private var copyStartMs = 0L
 
-	// The copy runs in CaptureService's own process so its long wait can't stall this app's UI and input
-	@Volatile private var service: Messenger? = null
-	private var serviceBound = false
-	private var serviceFailed = false
-	private var sharedMemory: SharedMemory? = null  // capture thread only
-	private var sharedBuffer: ByteBuffer? = null
-	private var memorySent = false
-	private var serviceRequest: Triple<Bitmap, Rect, Pair<Int, Int>>? = null
-	private val replies by lazy { Messenger(Handler(captureThread.looper) { msg ->
-		if(msg.what == CaptureService.MSG_COPY_DONE)
-			onServiceCopy(msg.arg1)
-		true
-	}) }
-	private val connection = object: ServiceConnection {
-		override fun onServiceConnected(name: ComponentName, binder: IBinder)
-		{
-			capture.post { memorySent = false; copyBusy = false }
-			service = Messenger(binder)
-			Log.i(TAG, "Capture process connected")
-		}
+	// The copy runs in CaptureService processes so its long wait can't stall this app's UI and input.
+	// One copy takes over a second on some TVs, so several processes copy in turn, started staggered.
+	private inner class Slot(val serviceClass: Class<*>)
+	{
+		@Volatile var messenger: Messenger? = null
+		var bound = false
+		// Capture thread only
+		var memory: SharedMemory? = null
+		var buffer: ByteBuffer? = null
+		var memorySent = false
+		var busy = false
+		var startMs = 0L
+		var seq = 0L
+		var request: Pair<Rect, Pair<Int, Int>>? = null
+		val replies by lazy { Messenger(Handler(captureThread.looper) { msg ->
+			if(msg.what == CaptureService.MSG_COPY_DONE)
+				onServiceCopy(this, msg.arg1)
+			true
+		}) }
+		val connection = object: ServiceConnection {
+			override fun onServiceConnected(name: ComponentName, binder: IBinder)
+			{
+				capture.post { memorySent = false; busy = false }
+				messenger = Messenger(binder)
+				Log.i(TAG, "Capture process ${serviceClass.simpleName} connected")
+			}
 
-		override fun onServiceDisconnected(name: ComponentName)
-		{
-			service = null
-			capture.post { copyBusy = false }
-			Log.w(TAG, "Capture process went away")
+			override fun onServiceDisconnected(name: ComponentName)
+			{
+				messenger = null
+				capture.post { busy = false }
+				Log.w(TAG, "Capture process ${serviceClass.simpleName} went away")
+			}
 		}
 	}
+
+	private val slots = mutableListOf<Slot>()
+	private var serviceFailed = false
+	private var copySeq = 0L          // capture thread only
+	private var lastProcessedSeq = 0L
+	private var lastCopyStartMs = 0L
+	private var avgCopyMs = 1000.0
 
 	init
 	{
 		if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1)
 		{
-			serviceBound = try { context.bindService(Intent(context, CaptureService::class.java), connection, Context.BIND_AUTO_CREATE) }
-				catch(e: Exception) { false }
+			for(cls in listOf(CaptureService::class.java, CaptureService2::class.java, CaptureService3::class.java))
+			{
+				val slot = Slot(cls)
+				slot.bound = try { context.bindService(Intent(context, cls), slot.connection, Context.BIND_AUTO_CREATE) }
+					catch(e: Exception) { false }
+				if(slot.bound)
+					slots.add(slot)
+			}
 		}
-		serviceFailed = !serviceBound
+		serviceFailed = slots.isEmpty()
 		if(serviceFailed)
 			Log.w(TAG, "Capture process not available, copying in the app (may delay input on some TVs)")
 	}
@@ -287,12 +307,13 @@ class SubtitleTranslator(
 		capture.removeCallbacksAndMessages(null)
 		captureThread.quitSafely()
 		network.shutdownNow()
-		if(serviceBound)
+		for(slot in slots)
 		{
-			try { context.unbindService(connection) } catch(e: Exception) { }
-			serviceBound = false
+			if(slot.bound)
+				try { context.unbindService(slot.connection) } catch(e: Exception) { }
+			slot.bound = false
+			slot.messenger = null
 		}
-		service = null
 	}
 
 	private val keepAlive = object: Runnable {
@@ -327,15 +348,30 @@ class SubtitleTranslator(
 		{
 			if(!running) return
 			// Don't wait forever for an answer that may never come (capture process restarted)
-			if(copyBusy && SystemClock.elapsedRealtime() - copyStartMs > 4000)
+			val now = SystemClock.elapsedRealtime()
+			if(copyBusy && now - copyStartMs > 4000)
 				copyBusy = false
-			if(!copyBusy)
-				grab()
+			for(slot in slots)
+				if(slot.busy && now - slot.startMs > 4000)
+					slot.busy = false
+			if(serviceFailed)
+			{
+				if(!copyBusy)
+					grab()
+			}
+			else
+			{
+				// Spread the copies evenly over the time one copy takes
+				val ready = slots.count { it.messenger != null }
+				val gap = if(ready > 0) max(GRAB_INTERVAL_MS.toDouble(), avgCopyMs / ready) else 0.0
+				if(ready > 0 && now - lastCopyStartMs >= gap)
+					slots.firstOrNull { it.messenger != null && !it.busy }?.let { grab(it) }
+			}
 			capture.postDelayed(this, GRAB_INTERVAL_MS)
 		}
 	}
 
-	private fun grab()
+	private fun grab(slot: Slot? = null)
 	{
 		if(Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
 		val holder = surfaceView.holder
@@ -350,43 +386,47 @@ class SubtitleTranslator(
 		val bh = max(32, (src.height() * scale).toInt())
 		val bmp = captureBitmap?.takeIf { it.width == bw && it.height == bh }
 			?: Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { captureBitmap = it }
-		if(!serviceFailed)
+		if(slot != null)
 		{
-			val messenger = service ?: return // still connecting
-			copyBusy = true
-			copyStartMs = SystemClock.elapsedRealtime()
+			val messenger = slot.messenger ?: return
+			slot.busy = true
+			slot.startMs = SystemClock.elapsedRealtime()
+			lastCopyStartMs = slot.startMs
+			slot.seq = ++copySeq
 			try
 			{
 				val bytes = bw * bh * 4
 				val data = Bundle()
-				if(sharedBuffer == null || sharedBuffer!!.capacity() < bytes || !memorySent)
+				var buf = slot.buffer
+				if(buf == null || buf.capacity() < bytes || !slot.memorySent)
 				{
-					if(sharedBuffer == null || sharedBuffer!!.capacity() < bytes)
+					if(buf == null || buf.capacity() < bytes)
 					{
-						sharedBuffer?.let { SharedMemory.unmap(it) }
-						sharedMemory?.close()
+						buf?.let { SharedMemory.unmap(it) }
+						slot.memory?.close()
 						val m = SharedMemory.create("subtitle-capture", bytes)
-						sharedMemory = m
-						sharedBuffer = m.mapReadOnly()
+						slot.memory = m
+						buf = m.mapReadOnly()
+						slot.buffer = buf
 					}
-					data.putParcelable(CaptureService.KEY_MEMORY, sharedMemory)
-					memorySent = true
+					data.putParcelable(CaptureService.KEY_MEMORY, slot.memory)
+					slot.memorySent = true
 				}
 				data.putParcelable(CaptureService.KEY_SURFACE, holder.surface)
 				data.putParcelable(CaptureService.KEY_RECT, src)
 				data.putInt(CaptureService.KEY_WIDTH, bw)
 				data.putInt(CaptureService.KEY_HEIGHT, bh)
-				serviceRequest = Triple(bmp, src, Pair(w, h))
+				slot.request = Pair(src, Pair(w, h))
 				val msg = Message.obtain(null, CaptureService.MSG_COPY)
 				msg.data = data
-				msg.replyTo = replies
+				msg.replyTo = slot.replies
 				messenger.send(msg)
 			}
 			catch(e: Exception)
 			{
 				Log.w(TAG, "Asking the capture process failed: $e")
-				memorySent = false
-				copyBusy = false
+				slot.memorySent = false
+				slot.busy = false
 			}
 			return
 		}
@@ -417,17 +457,26 @@ class SubtitleTranslator(
 		}
 	}
 
-	// Capture thread: the capture process has written the pixels into the shared memory
-	private fun onServiceCopy(result: Int)
+	// Capture thread: a capture process has written the pixels into its shared memory
+	private fun onServiceCopy(slot: Slot, result: Int)
 	{
-		val req = serviceRequest
-		serviceRequest = null
+		val req = slot.request
+		slot.request = null
 		try
 		{
-			val buf = sharedBuffer
-			if(req != null && buf != null && result == PixelCopy.SUCCESS && running)
+			if(!slot.busy) return
+			val took = SystemClock.elapsedRealtime() - slot.startMs
+			avgCopyMs = avgCopyMs * 0.7 + took * 0.3
+			val buf = slot.buffer
+			// Copies can finish out of order: an older look than the last one processed is of no use
+			if(req != null && buf != null && result == PixelCopy.SUCCESS && running && slot.seq > lastProcessedSeq)
 			{
-				val (bmp, src, size) = req
+				lastProcessedSeq = slot.seq
+				val (src, size) = req
+				val bw = max(64, (src.width() * min(1f, 1100f / size.first)).toInt())
+				val bh = max(32, (src.height() * min(1f, 1100f / size.first)).toInt())
+				val bmp = captureBitmap?.takeIf { it.width == bw && it.height == bh }
+					?: Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { captureBitmap = it }
 				buf.position(0)
 				bmp.copyPixelsFromBuffer(buf)
 				processFrame(bmp, size.first, size.second, src)
@@ -439,7 +488,7 @@ class SubtitleTranslator(
 		}
 		finally
 		{
-			copyBusy = false
+			slot.busy = false
 		}
 	}
 

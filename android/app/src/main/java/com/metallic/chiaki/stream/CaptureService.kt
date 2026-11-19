@@ -22,7 +22,7 @@ import java.nio.ByteBuffer
  * Protocol (Messenger): MSG_COPY with data {surface: Surface, rect: Rect, width, height, memory: SharedMemory};
  * replies MSG_COPY_DONE with arg1 = PixelCopy result, the RGBA pixels written to the shared memory.
  */
-class CaptureService: Service()
+open class CaptureService: Service()
 {
 	companion object
 	{
@@ -102,3 +102,7 @@ class CaptureService: Service()
 		}
 	}
 }
+
+/** More capture processes: one copy can take over a second, so they take turns */
+class CaptureService2: CaptureService()
+class CaptureService3: CaptureService()

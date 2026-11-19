@@ -71,6 +71,14 @@
             android:name=".stream.CaptureService"
             android:process=":capture"
             android:exported="false" />
+        <service
+            android:name=".stream.CaptureService2"
+            android:process=":capture2"
+            android:exported="false" />
+        <service
+            android:name=".stream.CaptureService3"
+            android:process=":capture3"
+            android:exported="false" />
 
         <activity
             android:name=".regist.RegistActivity"
