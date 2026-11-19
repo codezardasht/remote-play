@@ -193,7 +193,7 @@ public:
     void setSubtitlesModel(int index);
     bool subtitlesShowOriginal() const;
     void setSubtitlesShowOriginal(bool enabled);
-    int subtitlesStyle() const;             // 0 = replace the game's line, 1 = above it
+    int subtitlesStyle() const;             // 0 = clean, above the game's line; 1 = cover it
     void setSubtitlesStyle(int style);
     QString claudeApiKey() const;
     void setClaudeApiKey(const QString &key);

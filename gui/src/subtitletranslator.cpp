@@ -16,6 +16,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <memory>
 
 extern "C" {
 #include <libavutil/hwcontext.h>
@@ -27,8 +28,9 @@ Q_LOGGING_CATEGORY(chiakiSubtitles, "chiaki.subtitles");
 
 namespace {
 
-constexpr qint64 kGrabIntervalMs = 200;    // 5 looks per second
-constexpr qint64 kMinSendGapMs = 400;      // never more than 2.5 requests per second
+constexpr qint64 kGrabIntervalMs = 120;    // about 8 looks per second
+constexpr qint64 kMinSendGapMs = 250;      // never more than 4 requests per second
+constexpr int kMaxInFlight = 2;            // a new line doesn't wait for the previous answer
 constexpr int kCell = 4;                   // change-detection grid: 4x4 pixel cells
 constexpr int kMinInkCells = 30;           // less than this = no text in the area
 constexpr double kStableIoU = 0.80;        // same text as the previous look
@@ -88,7 +90,7 @@ QString systemPrompt(const QString &language)
         "(spoken dialogue, often starting with the speaker's name and a colon) and/or an on-screen mission or "
         "objective text. It may also contain parts of the game world, the HUD, a minimap, button prompts, money, "
         "ammo or score counters: those are not subtitles.\n\n"
-        "Fill the fields like this:\n"
+        "Fill the fields in this order:\n"
         "- original: the subtitle or objective text exactly as written, joined into one line. Leave out HUD numbers, "
         "button prompts and text that belongs to the game world (signs, posters, number plates).\n"
         "- speaker: the speaker's name if the line starts with one (for example \"FRANKLIN:\"), otherwise empty. "
@@ -102,21 +104,15 @@ QString systemPrompt(const QString &language)
         .arg(languageName(language), lang_rules);
 }
 
-QJsonObject subtitleSchema()
-{
-    QJsonObject str{ { "type", "string" } };
-    return QJsonObject{
-        { "type", "object" },
-        { "properties", QJsonObject{
-            { "has_subtitle", QJsonObject{ { "type", "boolean" } } },
-            { "speaker", str },
-            { "original", str },
-            { "translation", str },
-        } },
-        { "required", QJsonArray{ "has_subtitle", "speaker", "original", "translation" } },
-        { "additionalProperties", false },
-    };
-}
+// Written by hand because QJsonObject sorts keys: the answer follows this order, and the translation
+// must come before the English copy so it can be shown as soon as it is written.
+const char *kSubtitleSchema =
+    R"({"type":"object","properties":{)"
+    R"("has_subtitle":{"type":"boolean"},)"
+    R"("speaker":{"type":"string"},)"
+    R"("translation":{"type":"string"},)"
+    R"("original":{"type":"string"}},)"
+    R"("required":["has_subtitle","speaker","translation","original"],"additionalProperties":false})";
 
 // Haiku 5.5 may run without thinking (fastest). Sonnet 5.5 and Opus 5.5 reject that,
 // so they keep adaptive thinking and use low effort instead.
@@ -192,6 +188,7 @@ void SubtitleTranslator::refresh(bool session_running)
             worker_reset.storeRelease(1);
             pending_image.clear();
             recent_lines.clear();
+            shown_seq = next_seq;   // answers still on the way for the old stream are dropped
             clearSubtitle();
             setLiveBox(QRectF());
         }
@@ -387,21 +384,23 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
         }
     }
 
-    QMetaObject::invokeMethod(this, [this, data, media_type, text_box]() { sendImage(data, media_type, text_box); }, Qt::QueuedConnection);
+    const qint64 seen_ms = now;
+    QMetaObject::invokeMethod(this, [this, data, media_type, text_box, seen_ms]() { sendImage(data, media_type, text_box, seen_ms); }, Qt::QueuedConnection);
 }
 
-void SubtitleTranslator::sendImage(const QByteArray &image, const QString &media_type, const QRectF &box)
+void SubtitleTranslator::sendImage(const QByteArray &image, const QString &media_type, const QRectF &box, qint64 seen_ms)
 {
     if (!is_active)
         return;
-    if (request_in_flight) {
+    if (in_flight >= kMaxInFlight) {
         // Keep only the newest line; an older one waiting would be out of date by now
         pending_image = image;
         pending_media_type = media_type;
         pending_box = box;
+        pending_seen_ms = seen_ms;
         return;
     }
-    startRequest(image, media_type, box);
+    startRequest(image, media_type, box, seen_ms);
 }
 
 void SubtitleTranslator::setLiveBox(const QRectF &box)
@@ -435,11 +434,14 @@ QByteArray SubtitleTranslator::buildRequest(const Config &c, const QByteArray &i
     QJsonObject body{
         { "model", c.model },
         { "max_tokens", 1024 },
+        { "stream", true },
         { "system", systemPrompt(c.language) },
         { "messages", QJsonArray{ QJsonObject{ { "role", "user" }, { "content", content } } } },
     };
-    addSpeedSettings(body, c.model, QJsonObject{ { "type", "json_schema" }, { "schema", subtitleSchema() } });
-    return QJsonDocument(body).toJson(QJsonDocument::Compact);
+    addSpeedSettings(body, c.model, QJsonObject{ { "type", "json_schema" }, { "schema", "@SCHEMA@" } });
+    QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    json.replace("\"@SCHEMA@\"", kSubtitleSchema);
+    return json;
 }
 
 static QNetworkRequest apiRequest(const QString &api_key)
@@ -452,14 +454,263 @@ static QNetworkRequest apiRequest(const QString &api_key)
     return request;
 }
 
-void SubtitleTranslator::startRequest(const QByteArray &image, const QString &media_type, const QRectF &box)
+namespace {
+
+// Reading fields out of a JSON answer that is still being written
+int valueStart(const QString &s, const char *key)
+{
+    const QString quoted = QStringLiteral("\"%1\"").arg(QLatin1String(key));
+    int i = s.indexOf(quoted);
+    if (i < 0)
+        return -1;
+    i += quoted.size();
+    while (i < s.size() && s[i].isSpace())
+        i++;
+    if (i >= s.size() || s[i] != QLatin1Char(':'))
+        return -1;
+    i++;
+    while (i < s.size() && s[i].isSpace())
+        i++;
+    return i < s.size() ? i : -1;
+}
+
+bool partialString(const QString &s, const char *key, QString &out)
+{
+    const int i = valueStart(s, key);
+    if (i < 0 || s[i] != QLatin1Char('"'))
+        return false;
+    bool escaped = false;
+    for (int j = i + 1; j < s.size(); j++) {
+        if (escaped) {
+            escaped = false;
+        } else if (s[j] == QLatin1Char('\\')) {
+            escaped = true;
+        } else if (s[j] == QLatin1Char('"')) {
+            const QJsonDocument doc = QJsonDocument::fromJson((QStringLiteral("[") + s.mid(i, j - i + 1) + QStringLiteral("]")).toUtf8());
+            if (!doc.isArray())
+                return false;
+            out = doc.array().at(0).toString();
+            return true;
+        }
+    }
+    return false;
+}
+
+// -1 = not written yet, 0 = false, 1 = true
+int partialBool(const QString &s, const char *key)
+{
+    const int i = valueStart(s, key);
+    if (i < 0)
+        return -1;
+    if (s.mid(i, 4) == QLatin1String("true"))
+        return 1;
+    if (s.mid(i, 5) == QLatin1String("false"))
+        return 0;
+    return -1;
+}
+
+} // namespace
+
+struct SubtitleTranslator::Request {
+    int seq = 0;
+    QRectF box;
+    qint64 seen_ms = 0;
+    qint64 sent_ms = 0;
+    QByteArray buffer;      // unparsed stream data
+    QByteArray error_body;  // body of a failed request
+    QString answer;         // the JSON answer as written so far
+    bool shown = false;
+    bool no_subtitle = false;
+    QString stop_reason;
+    QString stream_error;
+    double in_tokens = 0, out_tokens = 0;
+};
+
+void SubtitleTranslator::startRequest(const QByteArray &image, const QString &media_type, const QRectF &box, qint64 seen_ms)
 {
     const Config c = config();
     if (c.api_key.isEmpty())
         return;
-    request_in_flight = true;
+    auto req = std::make_shared<Request>();
+    req->seq = ++next_seq;
+    req->box = box;
+    req->seen_ms = seen_ms;
+    req->sent_ms = clock.elapsed();
+    in_flight++;
     QNetworkReply *reply = network->post(apiRequest(c.api_key), buildRequest(c, image, media_type));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, box]() { handleReply(reply, false, box); });
+    // The answer is streamed, so the translation can be shown as soon as it is written
+    connect(reply, &QNetworkReply::readyRead, this, [this, reply, req]() { readStream(reply, req); });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, req]() { finishStream(reply, req); });
+}
+
+void SubtitleTranslator::readStream(QNetworkReply *reply, const std::shared_ptr<Request> &req)
+{
+    const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (http != 200) {
+        req->error_body += reply->readAll();
+        return;
+    }
+    req->buffer += reply->readAll();
+    int newline;
+    while ((newline = req->buffer.indexOf('\n')) >= 0) {
+        const QByteArray line = req->buffer.left(newline).trimmed();
+        req->buffer.remove(0, newline + 1);
+        if (!line.startsWith("data:"))
+            continue;
+        const QJsonObject event = QJsonDocument::fromJson(line.mid(5).trimmed()).object();
+        const QString type = event.value("type").toString();
+        if (type == QLatin1String("message_start")) {
+            req->in_tokens = event.value("message").toObject().value("usage").toObject().value("input_tokens").toDouble();
+        } else if (type == QLatin1String("content_block_delta")) {
+            const QJsonObject delta = event.value("delta").toObject();
+            if (delta.value("type").toString() == QLatin1String("text_delta")) {
+                req->answer += delta.value("text").toString();
+                showEarly(req);
+            }
+        } else if (type == QLatin1String("message_delta")) {
+            req->stop_reason = event.value("delta").toObject().value("stop_reason").toString();
+            req->out_tokens = event.value("usage").toObject().value("output_tokens").toDouble();
+        } else if (type == QLatin1String("error")) {
+            req->stream_error = event.value("error").toObject().value("message").toString();
+        }
+    }
+}
+
+void SubtitleTranslator::showEarly(const std::shared_ptr<Request> &req)
+{
+    if (req->shown || req->no_subtitle)
+        return;
+    const int has = partialBool(req->answer, "has_subtitle");
+    if (has == 0) {
+        req->no_subtitle = true;
+        return;
+    }
+    QString translation;
+    if (has != 1 || !partialString(req->answer, "translation", translation))
+        return;
+    QString speaker;
+    partialString(req->answer, "speaker", speaker);
+    showTranslation(req, translation.trimmed(), speaker.trimmed());
+}
+
+void SubtitleTranslator::showTranslation(const std::shared_ptr<Request> &req, const QString &translation, const QString &speaker)
+{
+    req->shown = true;
+    // An older line that finishes after a newer one is already on screen is not shown
+    if (translation.isEmpty() || req->seq <= shown_seq)
+        return;
+    shown_seq = req->seq;
+    current_text = translation;
+    current_speaker = speaker;
+    current_original.clear();
+    current_box = req->box;
+    current_serial++;
+    emit subtitleChanged();
+    emit originalChanged();
+    const qint64 now = clock.elapsed();
+    qCInfo(chiakiSubtitles).nospace() << "line on screen " << (now - req->seen_ms) << " ms after it was seen ("
+                                      << (req->sent_ms - req->seen_ms) << " ms to send, "
+                                      << (now - req->sent_ms) << " ms Claude)";
+}
+
+void SubtitleTranslator::finishStream(QNetworkReply *reply, const std::shared_ptr<Request> &req)
+{
+    reply->deleteLater();
+    if (reply->bytesAvailable())
+        readStream(reply, req);
+    if (!req->buffer.isEmpty()) {
+        req->buffer += '\n';
+        readStream(reply, req);
+    }
+    in_flight = std::max(0, in_flight - 1);
+    const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const Config c = config();
+
+    auto next = [this]() {
+        if (!pending_image.isEmpty() && is_active && in_flight < kMaxInFlight) {
+            const QByteArray image = pending_image;
+            pending_image.clear();
+            startRequest(image, pending_media_type, pending_box, pending_seen_ms);
+        }
+    };
+
+    if (http == 0 || (reply->error() != QNetworkReply::NoError && http < 400)) {
+        setStatus(tr("No connection to Claude (%1)").arg(reply->errorString()), true);
+        next();
+        return;
+    }
+    if (http != 200) {
+        reportHttpError(http, QJsonDocument::fromJson(req->error_body).object(), c);
+        next();
+        return;
+    }
+    if (!req->stream_error.isEmpty()) {
+        qCWarning(chiakiSubtitles) << "Claude stream error" << req->stream_error;
+        setStatus(tr("Claude is busy right now, some lines are skipped."), true);
+        next();
+        return;
+    }
+
+    addCost(c, req->in_tokens, req->out_tokens);
+    if (status_error)
+        setStatus(QString(), false);
+
+    // A declined request or a cut-off answer is simply skipped
+    if (req->stop_reason != QLatin1String("end_turn")) {
+        qCInfo(chiakiSubtitles) << "Subtitle request skipped, stop_reason" << req->stop_reason;
+        next();
+        return;
+    }
+
+    const QJsonObject result = QJsonDocument::fromJson(req->answer.toUtf8()).object();
+    const QString translation = result.value("translation").toString().trimmed();
+    if (result.value("has_subtitle").toBool() && !translation.isEmpty()) {
+        const QString speaker = result.value("speaker").toString().trimmed();
+        const QString original = result.value("original").toString().trimmed();
+        if (!req->shown)
+            showTranslation(req, translation, speaker);
+        // The English copy arrives last; add it to the line on screen if that is still this one
+        if (shown_seq == req->seq && current_original != original) {
+            current_original = original;
+            emit originalChanged();
+        }
+        recent_lines.append(QStringLiteral("%1%2 => %3")
+                                .arg(speaker.isEmpty() ? QString() : speaker + QStringLiteral(": "), original, translation));
+        while (recent_lines.size() > kRecentLines)
+            recent_lines.removeFirst();
+    }
+    next();
+}
+
+void SubtitleTranslator::addCost(const Config &c, double in_tokens, double out_tokens)
+{
+    for (const Price &price : kPrices) {
+        if (c.model.startsWith(QLatin1String(price.prefix))) {
+            cost_usd += (in_tokens * price.in_per_mtok + out_tokens * price.out_per_mtok) / 1e6;
+            break;
+        }
+    }
+    request_count++;
+    emit usageChanged();
+}
+
+void SubtitleTranslator::reportHttpError(int http, const QJsonObject &json, const Config &c)
+{
+    const QString message = json.value("error").toObject().value("message").toString();
+    QString text;
+    switch (http) {
+    case 401: text = tr("Claude API key not accepted. Check it in Settings."); break;
+    case 403: text = tr("This API key may not use %1.").arg(modelLabel(c.model)); break;
+    case 404: text = tr("%1 is not available for this API key.").arg(modelLabel(c.model)); break;
+    case 429: text = tr("Too many requests to Claude, some lines are skipped."); break;
+    case 529:
+    case 500:
+    case 502:
+    case 503: text = tr("Claude is busy right now, some lines are skipped."); break;
+    default: text = message.isEmpty() ? tr("Claude error %1").arg(http) : message; break;
+    }
+    qCWarning(chiakiSubtitles) << "Claude API error" << http << message;
+    setStatus(text, true);
 }
 
 void SubtitleTranslator::testApiKey()
@@ -477,109 +728,23 @@ void SubtitleTranslator::testApiKey()
     };
     addSpeedSettings(body, c.model);
     QNetworkReply *reply = network->post(apiRequest(c.api_key), QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() { handleReply(reply, true, QRectF()); });
-}
-
-void SubtitleTranslator::handleReply(QNetworkReply *reply, bool is_test, const QRectF &box)
-{
-    reply->deleteLater();
-    const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    const QByteArray raw = reply->readAll();
-    const QJsonObject json = QJsonDocument::fromJson(raw).object();
-    const Config c = config();
-
-    auto next = [this, is_test]() {
-        if (is_test)
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QJsonObject json = QJsonDocument::fromJson(reply->readAll()).object();
+        const Config c = config();
+        if (http == 0 || (reply->error() != QNetworkReply::NoError && http < 400)) {
+            setStatus(tr("No connection to Claude (%1)").arg(reply->errorString()), true);
             return;
-        request_in_flight = false;
-        if (!pending_image.isEmpty() && is_active) {
-            const QByteArray image = pending_image;
-            const QString media_type = pending_media_type;
-            const QRectF pending = pending_box;
-            pending_image.clear();
-            startRequest(image, media_type, pending);
         }
-    };
-
-    if (http == 0 || (reply->error() != QNetworkReply::NoError && http < 400)) {
-        setStatus(tr("No connection to Claude (%1)").arg(reply->errorString()), true);
-        next();
-        return;
-    }
-
-    if (http != 200) {
-        const QString message = json.value("error").toObject().value("message").toString();
-        QString text;
-        switch (http) {
-        case 401: text = tr("Claude API key not accepted. Check it in Settings."); break;
-        case 403: text = tr("This API key may not use %1.").arg(modelLabel(c.model)); break;
-        case 404: text = tr("%1 is not available for this API key.").arg(modelLabel(c.model)); break;
-        case 429: text = tr("Too many requests to Claude, some lines are skipped."); break;
-        case 529:
-        case 500:
-        case 502:
-        case 503: text = tr("Claude is busy right now, some lines are skipped."); break;
-        default: text = message.isEmpty() ? tr("Claude error %1").arg(http) : message; break;
+        if (http != 200) {
+            reportHttpError(http, json, c);
+            return;
         }
-        qCWarning(chiakiSubtitles) << "Claude API error" << http << message;
-        setStatus(text, true);
-        next();
-        return;
-    }
-
-    // Cost of this request, from the token counts the API reports
-    const QJsonObject usage = json.value("usage").toObject();
-    const double in_tokens = usage.value("input_tokens").toDouble();
-    const double out_tokens = usage.value("output_tokens").toDouble();
-    for (const Price &price : kPrices) {
-        if (c.model.startsWith(QLatin1String(price.prefix))) {
-            cost_usd += (in_tokens * price.in_per_mtok + out_tokens * price.out_per_mtok) / 1e6;
-            break;
-        }
-    }
-    request_count++;
-    emit usageChanged();
-
-    QString answer;
-    for (const QJsonValue &block : json.value("content").toArray()) {
-        const QJsonObject b = block.toObject();
-        if (b.value("type").toString() == QLatin1String("text"))
-            answer += b.value("text").toString();
-    }
-
-    if (is_test) {
+        const QJsonObject usage = json.value("usage").toObject();
+        addCost(c, usage.value("input_tokens").toDouble(), usage.value("output_tokens").toDouble());
         setStatus(tr("✓ The key works with %1").arg(modelLabel(c.model)), false);
-        return;
-    }
-
-    if (status_error)
-        setStatus(QString(), false);
-
-    // A declined request or a cut-off answer is simply skipped
-    const QString stop_reason = json.value("stop_reason").toString();
-    if (stop_reason != QLatin1String("end_turn")) {
-        qCInfo(chiakiSubtitles) << "Subtitle request skipped, stop_reason" << stop_reason;
-        next();
-        return;
-    }
-
-    const QJsonObject result = QJsonDocument::fromJson(answer.toUtf8()).object();
-    const QString translation = result.value("translation").toString().trimmed();
-    if (result.value("has_subtitle").toBool() && !translation.isEmpty()) {
-        current_text = translation;
-        current_original = result.value("original").toString().trimmed();
-        current_speaker = result.value("speaker").toString().trimmed();
-        current_box = box;
-        current_serial++;
-        emit subtitleChanged();
-
-        recent_lines.append(QStringLiteral("%1%2 => %3")
-                                .arg(current_speaker.isEmpty() ? QString() : current_speaker + QStringLiteral(": "),
-                                     current_original, current_text));
-        while (recent_lines.size() > kRecentLines)
-            recent_lines.removeFirst();
-    }
-    next();
+    });
 }
 
 void SubtitleTranslator::setStatus(const QString &text, bool error)
@@ -601,4 +766,5 @@ void SubtitleTranslator::clearSubtitle()
     current_box = QRectF();
     current_serial++;
     emit subtitleChanged();
+    emit originalChanged();
 }

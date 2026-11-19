@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Window
+import QtQuick.Effects
 
 import org.streetpea.chiaking
 
@@ -327,18 +328,18 @@ Item {
         }
     }
 
-    // Live translated subtitles (Claude): the game's subtitle, read and translated into Kurdish Sorani or Arabic.
-    // Style "Replace": a solid band sits exactly on the game's own line (the app knows where the text is),
-    // so only the translation is visible. Style "Above": the translation sits just above the game's line.
+    // Live translated subtitles (Claude), styled like film subtitles: the same size as the game's own line,
+    // white text with a soft shadow and no box. Style "Clean" puts it just above the game's English line;
+    // style "Cover" puts a slim dark strip over the English line and the translation on it.
     Item {
         id: subtitleBar
         anchors.fill: parent
         readonly property var translator: Chiaki.window.subtitles !== undefined ? Chiaki.window.subtitles : null
         readonly property bool allowed: !!translator && !!Chiaki.session && !(menuController.open || menuController.closing) && !view.sessionLoading && !view.sessionError
-        readonly property bool replaceStyle: Chiaki.settings.subtitlesStyle !== 1
+        readonly property bool coverStyle: Chiaki.settings.subtitlesStyle === 1
         property bool shown: false
         property double shownAt: 0
-        visible: allowed && band.opacity > 0.01
+        visible: allowed && subtitleBlock.opacity > 0.01
 
         // Where the video is drawn inside the window (same rules as the renderer)
         readonly property real srcW: Chiaki.window.streamWidth > 0 ? Chiaki.window.streamWidth : 1920
@@ -378,7 +379,9 @@ Item {
             return Qt.rect(v.x + l * v.width, v.y + t * v.height, (r - l) * v.width, (btm - t) * v.height);
         }
         readonly property bool hasSource: sourceRect.width > 0
-        readonly property real maxTextWidth: videoRect.width * 0.86 - 48
+        readonly property real maxTextWidth: videoRect.width * 0.80
+        // Film-subtitle size: about the same as the game's own subtitles
+        readonly property int fontPx: Math.max(14, Math.min(34, Math.round(videoRect.height * 0.028)))
 
         function showLine() {
             if (!translator || !translator.text.length) {
@@ -412,16 +415,13 @@ Item {
             onTriggered: subtitleBar.shown = false
         }
 
-        Rectangle {
-            id: band
-            readonly property real padX: 22
-            readonly property real padY: 10
-            readonly property real wantW: subtitleColumn.width + 2 * padX
-            readonly property real wantH: subtitleColumn.height + 2 * padY
-            // Replace: at least as big as the game's line, so none of it shows around the edges
-            width: Math.min(subtitleBar.videoRect.width * 0.94,
-                            subtitleBar.replaceStyle && subtitleBar.hasSource ? Math.max(wantW, subtitleBar.sourceRect.width + 2 * padX) : wantW)
-            height: subtitleBar.replaceStyle && subtitleBar.hasSource ? Math.max(wantH, subtitleBar.sourceRect.height + 2 * padY) : wantH
+        Item {
+            id: subtitleBlock
+            width: Math.min(subtitleBar.videoRect.width * 0.9,
+                            subtitleBar.coverStyle && subtitleBar.hasSource ? Math.max(subtitleColumn.width + 24, subtitleBar.sourceRect.width + 16)
+                                                                            : subtitleColumn.width + 24)
+            height: subtitleBar.coverStyle && subtitleBar.hasSource ? Math.max(subtitleColumn.height + 8, subtitleBar.sourceRect.height + 8)
+                                                                    : subtitleColumn.height + 8
             x: {
                 const v = subtitleBar.videoRect;
                 const cx = subtitleBar.hasSource ? subtitleBar.sourceRect.x + subtitleBar.sourceRect.width / 2 : v.x + v.width / 2;
@@ -432,36 +432,39 @@ Item {
                 const src = subtitleBar.sourceRect;
                 let top;
                 if (!subtitleBar.hasSource)
-                    top = v.y + v.height * 0.955 - height;
-                else if (subtitleBar.replaceStyle)
+                    top = v.y + v.height * 0.93 - height;
+                else if (subtitleBar.coverStyle)
                     top = src.y + src.height / 2 - height / 2;
                 else
-                    top = src.y - 10 - height;
+                    top = src.y - 4 - height;   // just above the game's English line
                 return Math.max(v.y + 8, Math.min(v.y + v.height - height - 4, top));
             }
-            Behavior on y { enabled: band.opacity > 0.5; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-            radius: 12
-            color: subtitleBar.replaceStyle ? Qt.rgba(0.035, 0.045, 0.07, 0.95) : Qt.rgba(0, 0, 0, 0.55)
-            border.width: 1
-            border.color: Qt.rgba(1, 1, 1, subtitleBar.replaceStyle ? 0.10 : 0.0)
             opacity: subtitleBar.allowed && subtitleBar.shown && !!subtitleBar.translator && subtitleBar.translator.text.length > 0 ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+            Behavior on opacity { NumberAnimation { duration: 140 } }
+
+            // Cover style only: a slim strip that hides the English line underneath
+            Rectangle {
+                anchors.fill: parent
+                visible: subtitleBar.coverStyle
+                radius: Math.min(10, height / 2)
+                color: Qt.rgba(0.02, 0.02, 0.03, 0.82)
+            }
 
             Column {
                 id: subtitleColumn
                 anchors.centerIn: parent
-                spacing: 3
-
-                Text {
-                    width: Math.min(implicitWidth, subtitleBar.maxTextWidth)
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    visible: text.length > 0
-                    horizontalAlignment: Text.AlignHCenter
-                    font.pixelSize: Math.max(13, Math.round(subtitleBar.videoRect.height * 0.019))
-                    font.bold: true
-                    color: "#7fd3ff"
-                    text: subtitleBar.translator ? subtitleBar.translator.speaker : ""
+                spacing: 2
+                // Soft shadow under the letters keeps them readable on bright scenes without a box
+                layer.enabled: !subtitleBar.coverStyle
+                layer.effect: MultiEffect {
+                    shadowEnabled: true
+                    shadowColor: "#000000"
+                    shadowOpacity: 0.9
+                    shadowBlur: 0.45
+                    shadowVerticalOffset: 1
+                    shadowHorizontalOffset: 0
                 }
+
                 Text {
                     width: Math.min(implicitWidth, subtitleBar.maxTextWidth)
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -469,21 +472,21 @@ Item {
                     wrapMode: Text.WordWrap
                     // Sorani and Arabic letters (ڕ ڵ ۆ ێ ە); the system picks another font if this one is missing
                     font.family: "Noto Sans Arabic"
-                    font.pixelSize: Math.max(18, Math.round(subtitleBar.videoRect.height * 0.034))
-                    font.weight: Font.DemiBold
-                    lineHeight: 1.1
-                    style: subtitleBar.replaceStyle ? Text.Normal : Text.Outline
-                    styleColor: "#cc000000"
+                    font.pixelSize: subtitleBar.fontPx
+                    font.weight: Font.Medium
+                    style: subtitleBar.coverStyle ? Text.Normal : Text.Outline
+                    styleColor: "#73000000"
                     color: "#ffffff"
                     text: subtitleBar.translator ? subtitleBar.translator.text : ""
                 }
                 Text {
                     width: Math.min(implicitWidth, subtitleBar.maxTextWidth)
                     anchors.horizontalCenter: parent.horizontalCenter
-                    visible: Chiaki.settings.subtitlesShowOriginal && text.length > 0
+                    // In Clean style the game's own English line is right below, so a copy would only repeat it
+                    visible: subtitleBar.coverStyle && Chiaki.settings.subtitlesShowOriginal && text.length > 0
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
-                    font.pixelSize: Math.max(12, Math.round(subtitleBar.videoRect.height * 0.017))
+                    font.pixelSize: Math.max(11, Math.round(subtitleBar.fontPx * 0.6))
                     color: "#b3ffffff"
                     text: subtitleBar.translator ? subtitleBar.translator.original : ""
                 }

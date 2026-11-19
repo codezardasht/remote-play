@@ -12,6 +12,7 @@
 #include <QElapsedTimer>
 #include <QAtomicInteger>
 #include <vector>
+#include <memory>
 
 extern "C" {
 #include <libavutil/frame.h>
@@ -20,10 +21,11 @@ extern "C" {
 class Settings;
 class QNetworkAccessManager;
 class QNetworkReply;
+class QJsonObject;
 
 // Live subtitle translation with Claude.
 //
-// About three times a second the stream hands over a reference to the newest decoded frame.
+// About eight times a second the stream hands over a reference to the newest decoded frame.
 // A worker thread copies the subtitle area (bottom-centre of the picture, brightness only),
 // and checks on this PC whether new subtitle text has appeared and stopped changing.
 // Only then is that small image sent to the Claude API, which reads the line and translates it
@@ -32,7 +34,8 @@ class SubtitleTranslator : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString text READ text NOTIFY subtitleChanged)
-    Q_PROPERTY(QString original READ original NOTIFY subtitleChanged)
+    // The English line arrives a moment after the translation
+    Q_PROPERTY(QString original READ original NOTIFY originalChanged)
     Q_PROPERTY(QString speaker READ speaker NOTIFY subtitleChanged)
     Q_PROPERTY(int serial READ serial NOTIFY subtitleChanged)
     // Where the game drew the line that `text` translates, as fractions of the video frame (0..1)
@@ -75,6 +78,7 @@ public:
 
 signals:
     void subtitleChanged();
+    void originalChanged();
     // The game's own subtitle went away (so ours can fade out)
     void sourceCleared();
     void activeChanged();
@@ -91,9 +95,15 @@ private:
     };
 
     void processFrame(AVFrame *frame);          // worker thread
-    void sendImage(const QByteArray &image, const QString &media_type, const QRectF &box);     // main thread
-    void startRequest(const QByteArray &image, const QString &media_type, const QRectF &box);
-    void handleReply(QNetworkReply *reply, bool is_test, const QRectF &box);
+    struct Request;
+    void sendImage(const QByteArray &image, const QString &media_type, const QRectF &box, qint64 seen_ms);     // main thread
+    void startRequest(const QByteArray &image, const QString &media_type, const QRectF &box, qint64 seen_ms);
+    void readStream(QNetworkReply *reply, const std::shared_ptr<Request> &req);
+    void showEarly(const std::shared_ptr<Request> &req);
+    void showTranslation(const std::shared_ptr<Request> &req, const QString &translation, const QString &speaker);
+    void finishStream(QNetworkReply *reply, const std::shared_ptr<Request> &req);
+    void addCost(const Config &c, double in_tokens, double out_tokens);
+    void reportHttpError(int http, const QJsonObject &json, const Config &c);
     void setLiveBox(const QRectF &box);
     void setStatus(const QString &text, bool error);
     void clearSubtitle();
@@ -120,8 +130,11 @@ private:
     qint64 last_send_ms = -100000;
 
     // Main thread only
-    bool request_in_flight = false;
+    int in_flight = 0;
+    int next_seq = 0;
+    int shown_seq = 0;
     QByteArray pending_image;
+    qint64 pending_seen_ms = 0;
     QString pending_media_type;
     QRectF pending_box;
     QRectF current_box;
