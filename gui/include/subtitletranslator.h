@@ -7,6 +7,7 @@
 #include <QString>
 #include <QStringList>
 #include <QImage>
+#include <QRectF>
 #include <QMutex>
 #include <QElapsedTimer>
 #include <QAtomicInteger>
@@ -34,6 +35,10 @@ class SubtitleTranslator : public QObject
     Q_PROPERTY(QString original READ original NOTIFY subtitleChanged)
     Q_PROPERTY(QString speaker READ speaker NOTIFY subtitleChanged)
     Q_PROPERTY(int serial READ serial NOTIFY subtitleChanged)
+    // Where the game drew the line that `text` translates, as fractions of the video frame (0..1)
+    Q_PROPERTY(QRectF box READ box NOTIFY subtitleChanged)
+    // Where the game's subtitle text is right now (empty when there is none)
+    Q_PROPERTY(QRectF liveBox READ liveBox NOTIFY liveBoxChanged)
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(bool statusIsError READ statusIsError NOTIFY statusChanged)
@@ -57,6 +62,8 @@ public:
     QString original() const { return current_original; }
     QString speaker() const { return current_speaker; }
     int serial() const { return current_serial; }
+    QRectF box() const { return current_box; }
+    QRectF liveBox() const { return live_box; }
     bool active() const { return is_active; }
     QString status() const { return status_text; }
     bool statusIsError() const { return status_error; }
@@ -71,6 +78,7 @@ signals:
     // The game's own subtitle went away (so ours can fade out)
     void sourceCleared();
     void activeChanged();
+    void liveBoxChanged();
     void statusChanged();
     void usageChanged();
 
@@ -83,9 +91,10 @@ private:
     };
 
     void processFrame(AVFrame *frame);          // worker thread
-    void sendImage(const QByteArray &image, const QString &media_type);     // main thread
-    void startRequest(const QByteArray &image, const QString &media_type);
-    void handleReply(QNetworkReply *reply, bool is_test);
+    void sendImage(const QByteArray &image, const QString &media_type, const QRectF &box);     // main thread
+    void startRequest(const QByteArray &image, const QString &media_type, const QRectF &box);
+    void handleReply(QNetworkReply *reply, bool is_test, const QRectF &box);
+    void setLiveBox(const QRectF &box);
     void setStatus(const QString &text, bool error);
     void clearSubtitle();
     QByteArray buildRequest(const Config &cfg, const QByteArray &image, const QString &media_type) const;
@@ -107,12 +116,16 @@ private:
     std::vector<quint8> prev_mask;
     std::vector<quint8> sent_mask;
     int empty_samples = 0;
+    QRectF last_live_box;
     qint64 last_send_ms = -100000;
 
     // Main thread only
     bool request_in_flight = false;
     QByteArray pending_image;
     QString pending_media_type;
+    QRectF pending_box;
+    QRectF current_box;
+    QRectF live_box;
     QStringList recent_lines;   // "speaker: original => translation", for consistent names and wording
     QString current_text;
     QString current_original;

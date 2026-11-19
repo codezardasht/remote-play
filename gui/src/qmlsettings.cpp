@@ -171,6 +171,17 @@ void QmlSettings::setSubtitlesShowOriginal(bool enabled)
     emit subtitlesChanged();
 }
 
+int QmlSettings::subtitlesStyle() const
+{
+    return settings->GetSubtitlesStyle();
+}
+
+void QmlSettings::setSubtitlesStyle(int style)
+{
+    settings->SetSubtitlesStyle(style == 1 ? 1 : 0);
+    emit subtitlesChanged();
+}
+
 QString QmlSettings::claudeApiKey() const
 {
     return settings->GetClaudeApiKey();

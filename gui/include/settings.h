@@ -282,6 +282,9 @@ class Settings : public QObject
 		void SetSubtitlesModel(const QString &model) { settings.setValue("settings/subtitles_model", model); }
 		bool GetSubtitlesShowOriginal() const      { return settings.value("settings/subtitles_show_original", false).toBool(); }
 		void SetSubtitlesShowOriginal(bool enabled) { settings.setValue("settings/subtitles_show_original", enabled); }
+		// 0 = cover the game's own line with the translation, 1 = show the translation above the game's line
+		int GetSubtitlesStyle() const              { return settings.value("settings/subtitles_style", 0).toInt(); }
+		void SetSubtitlesStyle(int style)          { settings.setValue("settings/subtitles_style", style); }
 		QString GetClaudeApiKey() const            { return settings.value("settings/claude_api_key").toString(); }
 		void SetClaudeApiKey(const QString &key)   { settings.setValue("settings/claude_api_key", key); }
 

@@ -2083,13 +2083,33 @@ DialogView {
 
                         Label {
                             Layout.alignment: Qt.AlignRight
+                            text: qsTr("Subtitle Style")
+                        }
+
+                        C.ComboBox {
+                            Layout.preferredWidth: 400
+                            model: [qsTr("Replace: cover the game's line with the translation"),
+                                    qsTr("Above: show the translation above the game's line")]
+                            currentIndex: Chiaki.settings.subtitlesStyle
+                            onActivated: index => Chiaki.settings.subtitlesStyle = index
+                        }
+
+                        Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("(Replace)")
+                        }
+
+                        Label {
+                            Layout.alignment: Qt.AlignRight
                             text: qsTr("Show English Line")
                         }
 
                         C.CheckBox {
                             checked: Chiaki.settings.subtitlesShowOriginal
                             onToggled: Chiaki.settings.subtitlesShowOriginal = !Chiaki.settings.subtitlesShowOriginal
-                            text: qsTr("Also show the original line under the translation")
+                            text: qsTr("Also show the original line, small, under the translation")
                         }
 
                         Label {

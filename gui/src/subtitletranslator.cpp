@@ -27,8 +27,8 @@ Q_LOGGING_CATEGORY(chiakiSubtitles, "chiaki.subtitles");
 
 namespace {
 
-constexpr qint64 kGrabIntervalMs = 330;    // about 3 looks per second
-constexpr qint64 kMinSendGapMs = 700;      // never more than ~1.4 requests per second
+constexpr qint64 kGrabIntervalMs = 200;    // 5 looks per second
+constexpr qint64 kMinSendGapMs = 400;      // never more than 2.5 requests per second
 constexpr int kCell = 4;                   // change-detection grid: 4x4 pixel cells
 constexpr int kMinInkCells = 30;           // less than this = no text in the area
 constexpr double kStableIoU = 0.80;        // same text as the previous look
@@ -84,7 +84,7 @@ QString systemPrompt(const QString &language)
 
     return QStringLiteral(
         "You read subtitles from video game pictures and translate them into %1 for the player.\n\n"
-        "The image is the bottom-centre of one frame of a PlayStation game, in greyscale. It may contain a subtitle "
+        "The image is a greyscale cut-out around text near the bottom of one frame of a PlayStation game. It may contain a subtitle "
         "(spoken dialogue, often starting with the speaker's name and a colon) and/or an on-screen mission or "
         "objective text. It may also contain parts of the game world, the HUD, a minimap, button prompts, money, "
         "ammo or score counters: those are not subtitles.\n\n"
@@ -184,12 +184,16 @@ void SubtitleTranslator::refresh(bool session_running)
     enabled_flag.storeRelease(now_active ? 1 : 0);
     if (now_active != is_active) {
         is_active = now_active;
+        // Open the secure connection now, so the first subtitle doesn't wait for it
+        if (is_active)
+            network->connectToHostEncrypted(QStringLiteral("api.anthropic.com"));
         if (!is_active) {
             // Stream ended or translation turned off: start fresh next time
             worker_reset.storeRelease(1);
             pending_image.clear();
             recent_lines.clear();
             clearSubtitle();
+            setLiveBox(QRectF());
         }
         emit activeChanged();
     }
@@ -230,6 +234,7 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
         prev_mask.clear();
         sent_mask.clear();
         empty_samples = 0;
+        last_live_box = QRectF();
     }
 
     // Hardware-decoded frames live on the GPU: copy this one frame to memory (about 3 times a second)
@@ -312,12 +317,39 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
         // The game's subtitle went away; after two empty looks the same line may be sent again later
         if (++empty_samples == 2) {
             sent_mask.clear();
-            QMetaObject::invokeMethod(this, [this]() { emit sourceCleared(); }, Qt::QueuedConnection);
+            last_live_box = QRectF();
+            QMetaObject::invokeMethod(this, [this]() { setLiveBox(QRectF()); emit sourceCleared(); }, Qt::QueuedConnection);
         }
         prev_mask = std::move(mask);
         return;
     }
     empty_samples = 0;
+
+    // Where the text is, as fractions of the whole frame (so the screen can cover exactly the game's line)
+    int min_cx = mw, max_cx = -1, min_cy = mh, max_cy = -1;
+    for (int cy = 0; cy < mh; cy++) {
+        for (int cx = 0; cx < mw; cx++) {
+            if (!mask[size_t(cy) * mw + cx])
+                continue;
+            min_cx = std::min(min_cx, cx);
+            max_cx = std::max(max_cx, cx);
+            min_cy = std::min(min_cy, cy);
+            max_cy = std::max(max_cy, cy);
+        }
+    }
+    const QRectF text_box(double(x0 + min_cx * kCell) / width,
+                          double(y0 + min_cy * kCell) / height,
+                          double((max_cx - min_cx + 1) * kCell) / width,
+                          double((max_cy - min_cy + 1) * kCell) / height);
+    const auto moved = [](const QRectF &a, const QRectF &b) {
+        return a.isNull() != b.isNull()
+            || qAbs(a.left() - b.left()) > 0.01 || qAbs(a.top() - b.top()) > 0.01
+            || qAbs(a.right() - b.right()) > 0.01 || qAbs(a.bottom() - b.bottom()) > 0.01;
+    };
+    if (moved(text_box, last_live_box)) {
+        last_live_box = text_box;
+        QMetaObject::invokeMethod(this, [this, text_box]() { setLiveBox(text_box); }, Qt::QueuedConnection);
+    }
 
     const bool stable = iou(mask, prev_mask) >= kStableIoU;   // text stopped changing (typewriter effects, fades)
     const bool is_new = iou(mask, sent_mask) < kNewIoU;       // not the line we already sent
@@ -330,7 +362,14 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
     sent_mask = std::move(mask);
     last_send_ms = now;
 
-    QImage image = area;
+    // Send only the text and a small margin around it: fewer image tokens = faster answer and lower cost
+    // Wide side margin: coloured words (names, highlights) are darker and may not count as "text" above
+    const int pad_x = 140, pad_y = 18;
+    const int bx0 = std::max(0, min_cx * kCell - pad_x);
+    const int by0 = std::max(0, min_cy * kCell - pad_y);
+    const int bx1 = std::min(cw, (max_cx + 1) * kCell + pad_x);
+    const int by1 = std::min(ch, (max_cy + 1) * kCell + pad_y);
+    QImage image = area.copy(bx0, by0, std::max(1, bx1 - bx0), std::max(1, by1 - by0));
     if (image.width() > kMaxImageWidth)
         image = image.scaledToWidth(kMaxImageWidth, Qt::SmoothTransformation);
 
@@ -348,10 +387,10 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
         }
     }
 
-    QMetaObject::invokeMethod(this, [this, data, media_type]() { sendImage(data, media_type); }, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, [this, data, media_type, text_box]() { sendImage(data, media_type, text_box); }, Qt::QueuedConnection);
 }
 
-void SubtitleTranslator::sendImage(const QByteArray &image, const QString &media_type)
+void SubtitleTranslator::sendImage(const QByteArray &image, const QString &media_type, const QRectF &box)
 {
     if (!is_active)
         return;
@@ -359,9 +398,18 @@ void SubtitleTranslator::sendImage(const QByteArray &image, const QString &media
         // Keep only the newest line; an older one waiting would be out of date by now
         pending_image = image;
         pending_media_type = media_type;
+        pending_box = box;
         return;
     }
-    startRequest(image, media_type);
+    startRequest(image, media_type, box);
+}
+
+void SubtitleTranslator::setLiveBox(const QRectF &box)
+{
+    if (live_box == box)
+        return;
+    live_box = box;
+    emit liveBoxChanged();
 }
 
 QByteArray SubtitleTranslator::buildRequest(const Config &c, const QByteArray &image, const QString &media_type) const
@@ -404,14 +452,14 @@ static QNetworkRequest apiRequest(const QString &api_key)
     return request;
 }
 
-void SubtitleTranslator::startRequest(const QByteArray &image, const QString &media_type)
+void SubtitleTranslator::startRequest(const QByteArray &image, const QString &media_type, const QRectF &box)
 {
     const Config c = config();
     if (c.api_key.isEmpty())
         return;
     request_in_flight = true;
     QNetworkReply *reply = network->post(apiRequest(c.api_key), buildRequest(c, image, media_type));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() { handleReply(reply, false); });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, box]() { handleReply(reply, false, box); });
 }
 
 void SubtitleTranslator::testApiKey()
@@ -429,10 +477,10 @@ void SubtitleTranslator::testApiKey()
     };
     addSpeedSettings(body, c.model);
     QNetworkReply *reply = network->post(apiRequest(c.api_key), QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() { handleReply(reply, true); });
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() { handleReply(reply, true, QRectF()); });
 }
 
-void SubtitleTranslator::handleReply(QNetworkReply *reply, bool is_test)
+void SubtitleTranslator::handleReply(QNetworkReply *reply, bool is_test, const QRectF &box)
 {
     reply->deleteLater();
     const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -447,8 +495,9 @@ void SubtitleTranslator::handleReply(QNetworkReply *reply, bool is_test)
         if (!pending_image.isEmpty() && is_active) {
             const QByteArray image = pending_image;
             const QString media_type = pending_media_type;
+            const QRectF pending = pending_box;
             pending_image.clear();
-            startRequest(image, media_type);
+            startRequest(image, media_type, pending);
         }
     };
 
@@ -520,6 +569,7 @@ void SubtitleTranslator::handleReply(QNetworkReply *reply, bool is_test)
         current_text = translation;
         current_original = result.value("original").toString().trimmed();
         current_speaker = result.value("speaker").toString().trimmed();
+        current_box = box;
         current_serial++;
         emit subtitleChanged();
 
@@ -548,6 +598,7 @@ void SubtitleTranslator::clearSubtitle()
     current_text.clear();
     current_original.clear();
     current_speaker.clear();
+    current_box = QRectF();
     current_serial++;
     emit subtitleChanged();
 }

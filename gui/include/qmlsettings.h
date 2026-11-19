@@ -35,6 +35,7 @@ class QmlSettings : public QObject
     Q_PROPERTY(int subtitlesLanguage READ subtitlesLanguage WRITE setSubtitlesLanguage NOTIFY subtitlesChanged)
     Q_PROPERTY(int subtitlesModel READ subtitlesModel WRITE setSubtitlesModel NOTIFY subtitlesChanged)
     Q_PROPERTY(bool subtitlesShowOriginal READ subtitlesShowOriginal WRITE setSubtitlesShowOriginal NOTIFY subtitlesChanged)
+    Q_PROPERTY(int subtitlesStyle READ subtitlesStyle WRITE setSubtitlesStyle NOTIFY subtitlesChanged)
     Q_PROPERTY(QString claudeApiKey READ claudeApiKey WRITE setClaudeApiKey NOTIFY subtitlesChanged)
     Q_PROPERTY(bool streamerMode READ streamerMode WRITE setStreamerMode NOTIFY streamerModeChanged)
     Q_PROPERTY(float hapticOverride READ hapticOverride WRITE setHapticOverride NOTIFY hapticOverrideChanged)
@@ -192,6 +193,8 @@ public:
     void setSubtitlesModel(int index);
     bool subtitlesShowOriginal() const;
     void setSubtitlesShowOriginal(bool enabled);
+    int subtitlesStyle() const;             // 0 = replace the game's line, 1 = above it
+    void setSubtitlesStyle(int style);
     QString claudeApiKey() const;
     void setClaudeApiKey(const QString &key);
 
