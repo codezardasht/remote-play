@@ -66,6 +66,12 @@
             android:name=".main.PsnLoginActivity"
             android:theme="@style/AppTheme" />
 
+        <!-- Subtitle picture capture in its own process: its slow copies can't stall the stream's input -->
+        <service
+            android:name=".stream.CaptureService"
+            android:process=":capture"
+            android:exported="false" />
+
         <activity
             android:name=".regist.RegistActivity"
             android:theme="@style/MageTheme"

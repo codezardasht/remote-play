@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import com.metallic.chiaki.R
 import com.metallic.chiaki.lib.StreamStats
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * The in-stream stats line, same as the desktop HUD (gui/src/qml/StreamView.qml):
@@ -40,6 +41,7 @@ class StreamHud(private val context: Context)
 	}
 
 	private var lastFrames = -1L
+	private var lastTickMs = 0L
 	private var lastFramesLost = -1L
 	private var peakFps = 0
 	private var warmupTicks = 3
@@ -50,7 +52,7 @@ class StreamHud(private val context: Context)
 
 	fun reset()
 	{
-		lastFrames = -1L; lastFramesLost = -1L; peakFps = 0; warmupTicks = 3; holdTicks = 0
+		lastFrames = -1L; lastTickMs = 0L; lastFramesLost = -1L; peakFps = 0; warmupTicks = 3; holdTicks = 0
 		stability = 0; issueTitle = ""; issueReason = ""
 		lossSamples.clear()
 	}
@@ -70,8 +72,12 @@ class StreamHud(private val context: Context)
 	/** Returns the text to show, given stats sampled one second after the previous call */
 	fun tick(stats: StreamStats): CharSequence
 	{
-		val fps = if(lastFrames >= 0) max(0L, stats.framesShown - lastFrames).toInt() else 0
+		// Divide by the real time since the last tick: the timer can fire late when the app is busy
+		val now = android.os.SystemClock.elapsedRealtime()
+		val elapsed = now - lastTickMs
+		val fps = if(lastFrames >= 0 && elapsed > 0) (max(0L, stats.framesShown - lastFrames) * 1000.0 / elapsed).roundToInt() else 0
 		lastFrames = stats.framesShown
+		lastTickMs = now
 		val lostDelta = if(lastFramesLost >= 0) max(0L, stats.framesLost - lastFramesLost).toInt() else 0
 		lastFramesLost = stats.framesLost
 		val loss = (if(lossSamples.isEmpty()) stats.packetLoss else lossSamples.average()) * 100.0

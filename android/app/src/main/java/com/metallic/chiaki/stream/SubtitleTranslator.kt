@@ -2,7 +2,16 @@
 
 package com.metallic.chiaki.stream
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.Bundle
+import android.os.IBinder
+import android.os.Message
+import android.os.Messenger
+import android.os.SharedMemory
+import java.nio.ByteBuffer
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.graphics.RectF
@@ -164,6 +173,48 @@ class SubtitleTranslator(
 	@Volatile private var config = readConfig()
 	@Volatile private var running = false   // stream connected and subtitles on
 	@Volatile private var copyBusy = false
+	@Volatile private var copyStartMs = 0L
+
+	// The copy runs in CaptureService's own process so its long wait can't stall this app's UI and input
+	@Volatile private var service: Messenger? = null
+	private var serviceBound = false
+	private var serviceFailed = false
+	private var sharedMemory: SharedMemory? = null  // capture thread only
+	private var sharedBuffer: ByteBuffer? = null
+	private var memorySent = false
+	private var serviceRequest: Triple<Bitmap, Rect, Pair<Int, Int>>? = null
+	private val replies by lazy { Messenger(Handler(captureThread.looper) { msg ->
+		if(msg.what == CaptureService.MSG_COPY_DONE)
+			onServiceCopy(msg.arg1)
+		true
+	}) }
+	private val connection = object: ServiceConnection {
+		override fun onServiceConnected(name: ComponentName, binder: IBinder)
+		{
+			capture.post { memorySent = false; copyBusy = false }
+			service = Messenger(binder)
+			Log.i(TAG, "Capture process connected")
+		}
+
+		override fun onServiceDisconnected(name: ComponentName)
+		{
+			service = null
+			capture.post { copyBusy = false }
+			Log.w(TAG, "Capture process went away")
+		}
+	}
+
+	init
+	{
+		if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1)
+		{
+			serviceBound = try { context.bindService(Intent(context, CaptureService::class.java), connection, Context.BIND_AUTO_CREATE) }
+				catch(e: Exception) { false }
+		}
+		serviceFailed = !serviceBound
+		if(serviceFailed)
+			Log.w(TAG, "Capture process not available, copying in the app (may delay input on some TVs)")
+	}
 
 	// Capture thread only
 	private var prevMask: ByteArray? = null
@@ -236,6 +287,12 @@ class SubtitleTranslator(
 		capture.removeCallbacksAndMessages(null)
 		captureThread.quitSafely()
 		network.shutdownNow()
+		if(serviceBound)
+		{
+			try { context.unbindService(connection) } catch(e: Exception) { }
+			serviceBound = false
+		}
+		service = null
 	}
 
 	private val keepAlive = object: Runnable {
@@ -269,6 +326,9 @@ class SubtitleTranslator(
 		override fun run()
 		{
 			if(!running) return
+			// Don't wait forever for an answer that may never come (capture process restarted)
+			if(copyBusy && SystemClock.elapsedRealtime() - copyStartMs > 4000)
+				copyBusy = false
 			if(!copyBusy)
 				grab()
 			capture.postDelayed(this, GRAB_INTERVAL_MS)
@@ -290,7 +350,48 @@ class SubtitleTranslator(
 		val bh = max(32, (src.height() * scale).toInt())
 		val bmp = captureBitmap?.takeIf { it.width == bw && it.height == bh }
 			?: Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { captureBitmap = it }
+		if(!serviceFailed)
+		{
+			val messenger = service ?: return // still connecting
+			copyBusy = true
+			copyStartMs = SystemClock.elapsedRealtime()
+			try
+			{
+				val bytes = bw * bh * 4
+				val data = Bundle()
+				if(sharedBuffer == null || sharedBuffer!!.capacity() < bytes || !memorySent)
+				{
+					if(sharedBuffer == null || sharedBuffer!!.capacity() < bytes)
+					{
+						sharedBuffer?.let { SharedMemory.unmap(it) }
+						sharedMemory?.close()
+						val m = SharedMemory.create("subtitle-capture", bytes)
+						sharedMemory = m
+						sharedBuffer = m.mapReadOnly()
+					}
+					data.putParcelable(CaptureService.KEY_MEMORY, sharedMemory)
+					memorySent = true
+				}
+				data.putParcelable(CaptureService.KEY_SURFACE, holder.surface)
+				data.putParcelable(CaptureService.KEY_RECT, src)
+				data.putInt(CaptureService.KEY_WIDTH, bw)
+				data.putInt(CaptureService.KEY_HEIGHT, bh)
+				serviceRequest = Triple(bmp, src, Pair(w, h))
+				val msg = Message.obtain(null, CaptureService.MSG_COPY)
+				msg.data = data
+				msg.replyTo = replies
+				messenger.send(msg)
+			}
+			catch(e: Exception)
+			{
+				Log.w(TAG, "Asking the capture process failed: $e")
+				memorySent = false
+				copyBusy = false
+			}
+			return
+		}
 		copyBusy = true
+		copyStartMs = SystemClock.elapsedRealtime()
 		try
 		{
 			PixelCopy.request(surfaceView, src, bmp, { result ->
@@ -313,6 +414,32 @@ class SubtitleTranslator(
 		catch(e: IllegalArgumentException)
 		{
 			copyBusy = false // surface went away
+		}
+	}
+
+	// Capture thread: the capture process has written the pixels into the shared memory
+	private fun onServiceCopy(result: Int)
+	{
+		val req = serviceRequest
+		serviceRequest = null
+		try
+		{
+			val buf = sharedBuffer
+			if(req != null && buf != null && result == PixelCopy.SUCCESS && running)
+			{
+				val (bmp, src, size) = req
+				buf.position(0)
+				bmp.copyPixelsFromBuffer(buf)
+				processFrame(bmp, size.first, size.second, src)
+			}
+		}
+		catch(e: Exception)
+		{
+			Log.e(TAG, "Processing a frame failed", e)
+		}
+		finally
+		{
+			copyBusy = false
 		}
 	}
 
