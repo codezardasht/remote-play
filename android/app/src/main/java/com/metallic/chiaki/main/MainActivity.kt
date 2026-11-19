@@ -12,10 +12,12 @@ import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.metallic.chiaki.R
 import com.metallic.chiaki.common.*
+import com.metallic.chiaki.common.ext.isTv
 import com.metallic.chiaki.common.ext.putRevealExtra
 import com.metallic.chiaki.common.ext.viewModelFactory
 import com.metallic.chiaki.databinding.ActivityMainBinding
@@ -31,6 +33,7 @@ class MainActivity : AppCompatActivity()
 	private lateinit var viewModel: MainViewModel
 
 	private lateinit var binding: ActivityMainBinding
+	private lateinit var connector: ConsoleConnector
 	private var discoveryMenuItem: MenuItem? = null
 
 	override fun onCreate(savedInstanceState: Bundle?)
@@ -60,14 +63,27 @@ class MainActivity : AppCompatActivity()
 		viewModel = ViewModelProvider(this, viewModelFactory { MainViewModel(getDatabase(this), Preferences(this)) })
 			.get(MainViewModel::class.java)
 
-		val recyclerViewAdapter = DisplayHostRecyclerViewAdapter(this::hostTriggered, this::wakeupHost, this::editHost, this::deleteHost)
+		PsnAccount.installCaBundle(this)
+		connector = ConsoleConnector(this, lifecycleScope, viewModel.discoveryManager)
+
+		val tv = isTv
+		val recyclerViewAdapter = DisplayHostRecyclerViewAdapter(tv, this::hostTriggered, this::wakeupHost, this::editHost, this::deleteHost, this::connectPsn)
 		binding.hostsRecyclerView.adapter = recyclerViewAdapter
-		binding.hostsRecyclerView.layoutManager = LinearLayoutManager(this)
+		binding.hostsRecyclerView.layoutManager = LinearLayoutManager(this, if(tv) LinearLayoutManager.HORIZONTAL else LinearLayoutManager.VERTICAL, false)
+		if(tv)
+		{
+			val pad = (48 * resources.displayMetrics.density).toInt()
+			binding.hostsRecyclerView.setPadding(pad, pad * 2, pad, pad)
+		}
 		viewModel.displayHosts.observe(this, Observer {
 			val top = binding.hostsRecyclerView.computeVerticalScrollOffset() == 0
+			val hadHosts = recyclerViewAdapter.hosts.isNotEmpty()
 			recyclerViewAdapter.hosts = it
 			if(top)
 				binding.hostsRecyclerView.scrollToPosition(0)
+			// TV: put the remote's focus on the first console so OK connects straight away
+			if(tv && !hadHosts && it.isNotEmpty())
+				binding.hostsRecyclerView.post { binding.hostsRecyclerView.getChildAt(0)?.requestFocus() }
 			updateEmptyInfo()
 		})
 
@@ -75,6 +91,15 @@ class MainActivity : AppCompatActivity()
 			discoveryMenuItem?.let { updateDiscoveryMenuItem(it, active) }
 			updateEmptyInfo()
 		})
+
+		if(savedInstanceState == null)
+			importSettingsFromIntent(this, intent, lifecycleScope)
+	}
+
+	override fun onNewIntent(intent: Intent)
+	{
+		super.onNewIntent(intent)
+		importSettingsFromIntent(this, intent, lifecycleScope)
 	}
 
 	private fun updateEmptyInfo()
@@ -105,6 +130,7 @@ class MainActivity : AppCompatActivity()
 	override fun onStop()
 	{
 		super.onStop()
+		connector.cancel()
 		viewModel.discoveryManager.pause()
 	}
 
@@ -133,6 +159,12 @@ class MainActivity : AppCompatActivity()
 		return true
 	}
 
+	override fun onPrepareOptionsMenu(menu: Menu): Boolean
+	{
+		menu.findItem(R.id.action_psn)?.setTitle(if(PsnAccount.isLoggedIn(this)) R.string.action_psn_logout else R.string.action_psn_login)
+		return super.onPrepareOptionsMenu(menu)
+	}
+
 	private fun updateDiscoveryMenuItem(item: MenuItem, active: Boolean)
 	{
 		item.isChecked = active
@@ -144,6 +176,19 @@ class MainActivity : AppCompatActivity()
 		R.id.action_discover ->
 		{
 			viewModel.discoveryManager.active = !(viewModel.discoveryActive.value ?: false)
+			true
+		}
+
+		R.id.action_psn ->
+		{
+			if(PsnAccount.isLoggedIn(this))
+				MaterialAlertDialogBuilder(this)
+					.setMessage(R.string.psn_logout_confirm)
+					.setPositiveButton(R.string.action_psn_logout) { _, _ -> PsnAccount.logout(this) }
+					.setNegativeButton(R.string.action_keep) { _, _ -> }
+					.show()
+			else
+				startActivity(Intent(this, PsnLoginActivity::class.java))
 			true
 		}
 
@@ -179,30 +224,17 @@ class MainActivity : AppCompatActivity()
 		val registeredHost = host.registeredHost
 		if(registeredHost != null)
 		{
-			fun connect() {
+			if(host is DiscoveredDisplayHost && host.discoveredHost.state == DiscoveryHost.State.READY)
+			{
+				// Seen on this network and awake: connect right away
 				val connectInfo = ConnectInfo(host.isPS5, host.host, registeredHost.rpRegistKey, registeredHost.rpKey, Preferences(this).videoProfile)
 				Intent(this, StreamActivity::class.java).let {
 					it.putExtra(StreamActivity.EXTRA_CONNECT_INFO, connectInfo)
 					startActivity(it)
 				}
 			}
-
-			if(host is DiscoveredDisplayHost && host.discoveredHost.state == DiscoveryHost.State.STANDBY)
-			{
-				MaterialAlertDialogBuilder(this)
-					.setMessage(R.string.alert_message_standby_wakeup)
-					.setPositiveButton(R.string.action_wakeup) { _, _ ->
-						wakeupHost(host)
-					}
-					.setNeutralButton(R.string.action_connect_immediately) { _, _ ->
-						connect()
-					}
-					.setNegativeButton(R.string.action_connect_cancel_connect) { _, _ -> }
-					.create()
-					.show()
-			}
-			else
-				connect()
+			else // asleep, or not seen by discovery (e.g. another subnet): check, wake, or go through PSN
+				connector.connect(host.host, registeredHost)
 		}
 		else
 		{
@@ -214,6 +246,12 @@ class MainActivity : AppCompatActivity()
 				startActivity(it)
 			}
 		}
+	}
+
+	private fun connectPsn(host: DisplayHost)
+	{
+		val registeredHost = host.registeredHost ?: return
+		connector.connect(host.host, registeredHost, forcePsn = true)
 	}
 
 	private fun wakeupHost(host: DisplayHost)

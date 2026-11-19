@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- White outline on the focused console card, like the highlighted card on the desktop / PS5 home -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true" android:color="#ffffff" />
+    <item android:color="@color/ps_card_border" />
+</selector>

@@ -39,3 +39,6 @@ chiaki.conf
 .cache/
 *.vscode
 site/
+
+# Desktop-to-Android settings export (contains keys and tokens)
+chiaki-settings-android.json

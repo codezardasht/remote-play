@@ -1,17 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<androidx.cardview.widget.CardView
+<com.google.android.material.card.MaterialCardView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="250dp"
-    app:cardCornerRadius="4dp"
-    android:layout_marginTop="8dp"
-    android:layout_marginLeft="8dp"
-    android:layout_marginRight="8dp"
+    app:cardCornerRadius="20dp"
+    app:cardBackgroundColor="@color/ps_card_background"
+    app:strokeColor="@color/ps_card_stroke"
+    app:strokeWidth="2dp"
+    app:cardElevation="0dp"
+    android:layout_marginTop="12dp"
+    android:layout_marginLeft="12dp"
+    android:layout_marginRight="12dp"
     android:layout_marginBottom="0dp"
-    android:elevation="8dp"
+    android:focusable="true"
+    android:clickable="true"
     android:foreground="?android:attr/selectableItemBackground">
 
     <FrameLayout
@@ -51,12 +56,12 @@
             android:id="@+id/nameTextView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:fontFamily="sans-serif-condensed-medium"
+            android:fontFamily="sans-serif-medium"
             app:layout_constraintTop_toTopOf="parent"
             tools:text="Name"
             android:textSize="32sp"
             android:gravity="center"
-            android:textColor="?attr/colorOnSurface"/>
+            android:textColor="@color/ps_text"/>
 
         <androidx.appcompat.widget.AppCompatTextView
             android:id="@+id/hostTextView"
@@ -67,7 +72,7 @@
             tools:text="Address: Host"
             android:textSize="16sp"
             android:gravity="center"
-            android:textColor="?attr/colorOnSurface"
+            android:textColor="@color/ps_text"
             android:maxLines="1"
             android:ellipsize="end"/>
 
@@ -80,7 +85,7 @@
             tools:text="ID: C0FFEE1337"
             android:textSize="16sp"
             android:gravity="center"
-            android:textColor="?attr/colorOnSurface"
+            android:textColor="@color/ps_text"
             android:maxLines="1"
             android:ellipsize="end"/>
 
@@ -100,7 +105,7 @@
             android:id="@+id/bottomInfoTextView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="?attr/colorOnSurface"
+            android:textColor="@color/ps_text"
             android:textSize="16sp"
             android:fontFamily="sans-serif-condensed-light"
             android:gravity="center"
@@ -112,4 +117,4 @@
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
-</androidx.cardview.widget.CardView>
+</com.google.android.material.card.MaterialCardView>

@@ -23,6 +23,9 @@ ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *dec
 	decoder->target_height = target_height;
 	decoder->target_codec = codec;
 	decoder->shutdown_output = false;
+	atomic_init(&decoder->frames_rendered, 0);
+	atomic_init(&decoder->out_width, 0);
+	atomic_init(&decoder->out_height, 0);
 	return chiaki_mutex_init(&decoder->codec_mutex, false);
 }
 
@@ -101,6 +104,12 @@ void android_chiaki_video_decoder_set_surface(AndroidChiakiVideoDecoder *decoder
 	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, mime);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, decoder->target_width);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, decoder->target_height);
+	// Show each frame as soon as it is decoded. Without this many TV decoders hold back several frames.
+	AMediaFormat_setInt32(format, "low-latency", 1);                          // Android 11+ (KEY_LOW_LATENCY)
+	AMediaFormat_setInt32(format, "priority", 0);                             // realtime
+	AMediaFormat_setInt32(format, "vendor.rtc-ext-dec-low-latency.enable", 1); // Qualcomm
+	AMediaFormat_setInt32(format, "vendor.low-latency.enable", 1);            // MediaTek / others
+	AMediaFormat_setInt32(format, "vdec-lowlatency", 1);                      // Amlogic / Realtek
 
 	media_status_t r = AMediaCodec_configure(decoder->codec, format, decoder->window, NULL, 0);
 	if(r != AMEDIA_OK)
@@ -196,10 +205,26 @@ static void *android_chiaki_video_decoder_output_thread_func(void *user)
 		if(status >= 0)
 		{
 			AMediaCodec_releaseOutputBuffer(decoder->codec, (size_t)status, info.size != 0);
+			if(info.size != 0)
+				atomic_fetch_add(&decoder->frames_rendered, 1);
 			if(info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM)
 			{
 				CHIAKI_LOGI(decoder->log, "AMediaCodec reported EOS");
 				break;
+			}
+		}
+		else if(status == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
+		{
+			AMediaFormat *format = AMediaCodec_getOutputFormat(decoder->codec);
+			if(format)
+			{
+				int32_t w = 0, h = 0;
+				AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_WIDTH, &w);
+				AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_HEIGHT, &h);
+				atomic_store(&decoder->out_width, w);
+				atomic_store(&decoder->out_height, h);
+				CHIAKI_LOGI(decoder->log, "Video decoder output format: %dx%d", (int)w, (int)h);
+				AMediaFormat_delete(format);
 			}
 		}
 		else

@@ -1,15 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#162d50</color>
-    <color name="primary_dark">#000128</color>
-    <color name="accent">#ffaaee</color>
+    <!-- PlayStation-style palette, same as the desktop app (gui/src/qml/qtquickcontrols2.conf) -->
+    <color name="primary">#0b1d3f</color>
+    <color name="primary_dark">#030a1c</color>
+    <color name="accent">#2f95ff</color>
+    <color name="ps_blue">#0070d1</color>
+    <color name="ps_blue_lit">#2f95ff</color>
+    <color name="ps_navy_top">#0d2a63</color>
+    <color name="ps_navy_mid">#081a40</color>
+    <color name="ps_navy_bottom">#030a1c</color>
+    <color name="ps_card">#1AFFFFFF</color>
+    <color name="ps_card_border">#2EFFFFFF</color>
+    <color name="ps_text">#f2f6fc</color>
+    <color name="ps_text_dim">#a9bddb</color>
+    <color name="ps_on_white">#0b1530</color>
+    <color name="hud_good">#5fe0a0</color>
+    <color name="hud_warn">#ffd166</color>
+    <color name="hud_bad">#ff7b7b</color>
 
     <color name="stream_text">@android:color/white</color>
     <color name="stream_background">@android:color/black</color>
     <color name="stream_overlay_background">#77000000</color>
 
-    <color name="floating_action_button_speed_dial_background">#fafafa</color>
-    <color name="floating_action_button_speed_dial_tint">#333333</color>
+    <color name="floating_action_button_speed_dial_background">#ffffff</color>
+    <color name="floating_action_button_speed_dial_tint">#0b1530</color>
 
     <color name="control_primary">#22ffffff</color>
     <color name="control_pressed">#88ffffff</color>

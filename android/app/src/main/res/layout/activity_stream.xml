@@ -20,11 +20,104 @@
             android:layout_height="wrap_content"/>
     </com.metallic.chiaki.stream.AspectRatioFrameLayout>
 
+    <!-- Live translated subtitles (positioned in code over the video, see SubtitleOverlay) -->
+    <FrameLayout
+        android:id="@+id/subtitleLayer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipChildren="false">
+
+        <ImageView
+            android:id="@+id/subtitleCover"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:scaleType="fitXY"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/subtitleBlock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="4dp"
+            android:alpha="0">
+
+            <TextView
+                android:id="@+id/subtitleText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:gravity="center"
+                android:textColor="@android:color/white"
+                android:fontFamily="sans-serif-medium"
+                android:shadowColor="#E6000000"
+                android:shadowRadius="6"
+                android:shadowDy="1"
+                android:textDirection="anyRtl" />
+
+            <TextView
+                android:id="@+id/subtitleOriginal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:gravity="center"
+                android:textColor="#B3FFFFFF"
+                android:shadowColor="#CC000000"
+                android:shadowRadius="4"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/subtitleStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="16dp"
+            android:textSize="15sp"
+            android:textColor="#FFD166"
+            android:shadowColor="#E6000000"
+            android:shadowRadius="4"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <!-- Stream stats HUD: text only, with a dark shadow so it stays readable on bright scenes -->
+    <TextView
+        android:id="@+id/hudTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="24dp"
+        android:layout_marginTop="18dp"
+        android:maxWidth="720dp"
+        android:textSize="15sp"
+        android:lineSpacingExtra="4dp"
+        android:textColor="@android:color/white"
+        android:shadowColor="#E6000000"
+        android:shadowRadius="4"
+        android:shadowDx="0"
+        android:shadowDy="1"
+        android:visibility="gone" />
+
     <ProgressBar
         android:id="@+id/progressBar"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="center"/>
+        android:layout_gravity="center"
+        android:indeterminateTint="@color/accent"/>
+
+    <TextView
+        android:id="@+id/statusTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginTop="72dp"
+        android:textColor="@color/ps_text"
+        android:textSize="18sp"
+        android:visibility="gone" />
 
     <fragment
         android:id="@+id/controlsFragment"

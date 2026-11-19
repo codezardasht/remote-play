@@ -52,8 +52,59 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+        app:key="category_subtitles"
+        app:title="@string/preferences_category_title_subtitles">
+        <SwitchPreference
+            app:key="subtitles_enabled"
+            app:defaultValue="false"
+            app:title="@string/preferences_subtitles_enabled_title"
+            app:summary="@string/preferences_subtitles_enabled_summary" />
+        <ListPreference
+            app:key="subtitles_language"
+            app:defaultValue="ckb"
+            app:title="@string/preferences_subtitles_language_title"
+            app:summary="%s"
+            app:entries="@array/subtitles_language_names"
+            app:entryValues="@array/subtitles_language_values" />
+        <ListPreference
+            app:key="subtitles_style"
+            app:defaultValue="0"
+            app:title="@string/preferences_subtitles_style_title"
+            app:summary="%s"
+            app:entries="@array/subtitles_style_names"
+            app:entryValues="@array/subtitles_style_values" />
+        <SwitchPreference
+            app:key="subtitles_instant"
+            app:defaultValue="true"
+            app:title="@string/preferences_subtitles_instant_title"
+            app:summary="@string/preferences_subtitles_instant_summary" />
+        <SwitchPreference
+            app:key="subtitles_show_original"
+            app:defaultValue="false"
+            app:title="@string/preferences_subtitles_show_original_title"
+            app:summary="@string/preferences_subtitles_show_original_summary" />
+        <ListPreference
+            app:key="subtitles_model"
+            app:defaultValue="claude-haiku-5-5"
+            app:title="@string/preferences_subtitles_model_title"
+            app:summary="%s"
+            app:entries="@array/subtitles_model_names"
+            app:entryValues="@array/subtitles_model_values" />
+        <EditTextPreference
+            app:key="claude_api_key"
+            app:title="@string/preferences_claude_api_key_title"
+            app:dialogMessage="@string/preferences_claude_api_key_dialog" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
         app:key="category_stream"
         app:title="@string/preferences_category_title_stream">
+        <SwitchPreference
+            app:key="@string/preferences_stream_stats_key"
+            app:defaultValue="true"
+            app:title="@string/preferences_stream_stats_title"
+            app:summary="@string/preferences_stream_stats_summary" />
+
         <ListPreference
             app:key="@string/preferences_resolution_key"
             app:title="@string/preferences_resolution_title"

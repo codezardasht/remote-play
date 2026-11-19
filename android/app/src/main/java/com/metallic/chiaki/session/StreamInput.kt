@@ -13,6 +13,8 @@ import com.metallic.chiaki.lib.ControllerState
 class StreamInput(val context: Context, val preferences: Preferences)
 {
 	var controllerStateChangedCallback: ((ControllerState) -> Unit)? = null
+	/** Back on the TV remote, or Share + Options together on a controller: open the in-game menu */
+	var menuRequestCallback: (() -> Unit)? = null
 
 	val controllerState: ControllerState get()
 	{
@@ -128,6 +130,11 @@ class StreamInput(val context: Context, val preferences: Preferences)
 
 		when(event.keyCode)
 		{
+			KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_MENU -> {
+				if(event.action == KeyEvent.ACTION_UP && !event.isCanceled)
+					menuRequestCallback?.invoke()
+				return true
+			}
 			KeyEvent.KEYCODE_BUTTON_L2 -> {
 				keyControllerState.l2State = if(event.action == KeyEvent.ACTION_DOWN) UByte.MAX_VALUE else 0U
 				return true
@@ -140,11 +147,14 @@ class StreamInput(val context: Context, val preferences: Preferences)
 
 		val buttonMask: UInt = when(event.keyCode)
 		{
-			// dpad handled by MotionEvents
-			//KeyEvent.KEYCODE_DPAD_LEFT -> ControllerState.BUTTON_DPAD_LEFT
-			//KeyEvent.KEYCODE_DPAD_RIGHT -> ControllerState.BUTTON_DPAD_RIGHT
-			//KeyEvent.KEYCODE_DPAD_UP -> ControllerState.BUTTON_DPAD_UP
-			//KeyEvent.KEYCODE_DPAD_DOWN -> ControllerState.BUTTON_DPAD_DOWN
+			// Gamepads report the dpad as hat axes (MotionEvents); TV remotes and some pads send keys.
+			// Both are merged, so a pad that sends both still works.
+			KeyEvent.KEYCODE_DPAD_LEFT -> ControllerState.BUTTON_DPAD_LEFT
+			KeyEvent.KEYCODE_DPAD_RIGHT -> ControllerState.BUTTON_DPAD_RIGHT
+			KeyEvent.KEYCODE_DPAD_UP -> ControllerState.BUTTON_DPAD_UP
+			KeyEvent.KEYCODE_DPAD_DOWN -> ControllerState.BUTTON_DPAD_DOWN
+			// OK on the TV remote
+			KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> ControllerState.BUTTON_CROSS
 			KeyEvent.KEYCODE_BUTTON_A -> if(swapCrossMoon) ControllerState.BUTTON_MOON else ControllerState.BUTTON_CROSS
 			KeyEvent.KEYCODE_BUTTON_B -> if(swapCrossMoon) ControllerState.BUTTON_CROSS else ControllerState.BUTTON_MOON
 			KeyEvent.KEYCODE_BUTTON_X -> if(swapCrossMoon) ControllerState.BUTTON_PYRAMID else ControllerState.BUTTON_BOX
@@ -169,8 +179,26 @@ class StreamInput(val context: Context, val preferences: Preferences)
 			}
 		}
 
+		val menuCombo = ControllerState.BUTTON_SHARE or ControllerState.BUTTON_OPTIONS
+		if(keyControllerState.buttons and menuCombo == menuCombo)
+		{
+			keyControllerState.buttons = keyControllerState.buttons and menuCombo.inv()
+			controllerStateUpdated()
+			menuRequestCallback?.invoke()
+			return true
+		}
+
 		controllerStateUpdated()
 		return true
+	}
+
+	/** Release everything held, e.g. when a menu takes over input */
+	fun releaseAll()
+	{
+		keyControllerState.buttons = 0U
+		keyControllerState.l2State = 0U
+		keyControllerState.r2State = 0U
+		controllerStateUpdated()
 	}
 
 	fun onGenericMotionEvent(event: MotionEvent): Boolean

@@ -6,9 +6,11 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.app.AlertDialog
 import android.graphics.Matrix
+import android.content.Intent
 import android.os.*
 import android.view.*
 import android.widget.EditText
+import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
@@ -23,7 +25,9 @@ import androidx.lifecycle.*
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.metallic.chiaki.R
 import com.metallic.chiaki.common.Preferences
+import com.metallic.chiaki.common.ext.isTv
 import com.metallic.chiaki.common.ext.viewModelFactory
+import com.metallic.chiaki.settings.SettingsActivity
 import com.metallic.chiaki.databinding.ActivityStreamBinding
 import com.metallic.chiaki.lib.ConnectInfo
 import com.metallic.chiaki.lib.ConnectVideoProfile
@@ -47,7 +51,21 @@ class StreamActivity : AppCompatActivity()
 	{
 		const val EXTRA_CONNECT_INFO = "connect_info"
 		private const val HIDE_UI_TIMEOUT_MS = 2000L
+		private const val HUD_SAMPLE_MS = 200L
+		private const val MAX_AUTO_RECONNECTS = 3
+		private const val AUTO_RECONNECT_DELAY_MS = 1500L
+		// CHIAKI_QUIT_REASON_CTRL_UNKNOWN, _STREAM_CONNECTION_UNKNOWN (lib/include/chiaki/session.h)
+		private val AUTO_RECONNECT_REASONS = setOf(7, 10)
+		private const val HUD_SAMPLES_PER_TICK = 5
 	}
+
+	private lateinit var preferences: Preferences
+	private lateinit var hud: StreamHud
+	private var subtitles: SubtitleTranslator? = null
+	private var subtitleOverlay: SubtitleOverlay? = null
+	private var tv = false
+	// Set while our own Settings screen is open on top, so the stream keeps running behind it
+	private var keepSessionOnPause = false
 
 	private lateinit var viewModel: StreamViewModel
 	private lateinit var binding: ActivityStreamBinding
@@ -71,9 +89,34 @@ class StreamActivity : AppCompatActivity()
 		})[StreamViewModel::class.java]
 
 		viewModel.input.observe(this)
+		preferences = Preferences(this)
+		hud = StreamHud(this)
+		hud.remote = connectInfo.duid != null
+		tv = isTv
 
 		binding = ActivityStreamBinding.inflate(layoutInflater)
 		setContentView(binding.root)
+
+		viewModel.input.menuRequestCallback = { showStreamMenu() }
+		subtitleOverlay = SubtitleOverlay(binding, preferences).also { overlay ->
+			subtitles = SubtitleTranslator(applicationContext, binding.surfaceView, overlay)
+		}
+		// Ask the TV for its Game Mode (ALLM): no picture processing, which otherwise adds 50-150 ms of lag
+		if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+			window.setPreferMinimalPostProcessing(true)
+		// TV remotes with a pointer (air mouse) would otherwise leave a cursor over the game
+		if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
+			binding.root.pointerIcon = PointerIcon.getSystemIcon(this, PointerIcon.TYPE_NULL)
+		onBackPressedDispatcher.addCallback(this) { showStreamMenu() }
+
+		if(tv)
+		{
+			// No touchscreen: no on-screen controls or touch overlay, everything goes through the in-game menu
+			viewModel.setOnScreenControlsEnabled(false)
+			viewModel.setTouchpadOnlyEnabled(false)
+			supportFragmentManager.findFragmentById(R.id.controlsFragment)?.view?.isGone = true
+			supportFragmentManager.findFragmentById(R.id.touchpadOnlyFragment)?.view?.isGone = true
+		}
 
 		WindowCompat.setDecorFitsSystemWindows(window, false)
 		insetsController = WindowCompat.getInsetsController(window, window.decorView)
@@ -81,7 +124,7 @@ class StreamActivity : AppCompatActivity()
 
 		ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
 			val systemBars = insets.isVisible(WindowInsetsCompat.Type.systemBars())
-			if(systemBars)
+			if(systemBars && !tv)
 				showOverlay()
 			else
 				hideOverlay()
@@ -109,6 +152,9 @@ class StreamActivity : AppCompatActivity()
 			viewModel.setTouchpadOnlyEnabled(isChecked)
 			showOverlay()
 		}
+
+		if(tv)
+			binding.overlay.isGone = true
 
 		binding.displayModeToggle.addOnButtonCheckedListener { _, _, _ ->
 			adjustStreamViewAspect()
@@ -157,18 +203,143 @@ class StreamActivity : AppCompatActivity()
 	{
 		super.onResume()
 		hideSystemUI()
+		keepSessionOnPause = false
 		viewModel.session.resume()
+		updateHudVisibility()
+		hud.reset()
+		uiVisibilityHandler.post(hudRunnable)
 	}
 
 	override fun onPause()
 	{
 		super.onPause()
-		viewModel.session.pause()
+		uiVisibilityHandler.removeCallbacks(hudRunnable)
+		if(!keepSessionOnPause)
+		{
+			viewModel.session.pause()
+			subtitles?.refresh(false)
+		}
+	}
+
+	override fun onStop()
+	{
+		super.onStop()
+		// Leaving the app (Home on the remote) always ends the stream, even with Settings open
+		if(keepSessionOnPause && !isChangingConfigurations)
+		{
+			keepSessionOnPause = false
+			viewModel.session.pause()
+		}
+	}
+
+	private var hudSamples = 0
+	private val hudRunnable = object: Runnable {
+		override fun run()
+		{
+			if(viewModel.session.state.value == StreamStateConnected)
+			{
+				if(!preferences.streamStats)
+				{
+					if(++hudSamples >= HUD_SAMPLES_PER_TICK)
+					{
+						hudSamples = 0
+						subtitles?.refresh(true)
+					}
+				}
+				else viewModel.session.session?.stats()?.let {
+					hud.sampleLoss(it.packetLoss)
+					if(++hudSamples >= HUD_SAMPLES_PER_TICK)
+					{
+						hudSamples = 0
+						subtitles?.refresh(true)
+						binding.hudTextView.text = hud.tick(it)
+					}
+				}
+			}
+			updateHudVisibility()
+			uiVisibilityHandler.postDelayed(this, HUD_SAMPLE_MS)
+		}
+	}
+
+	private fun updateHudVisibility()
+	{
+		binding.hudTextView.isVisible = preferences.streamStats
+				&& viewModel.session.state.value == StreamStateConnected
+				&& binding.hudTextView.text.isNotEmpty()
+	}
+
+	private var menuDialog: androidx.appcompat.app.AlertDialog? = null
+
+	/** In-game menu: Back on the TV remote, Share + Options on a controller, or the system Back gesture on phones */
+	private fun showStreamMenu()
+	{
+		if(menuDialog?.isShowing == true || dialog != null)
+			return
+		viewModel.input.releaseAll()
+		val modeNames = mapOf(
+			R.id.display_mode_normal_button to getString(R.string.stream_menu_display_fit),
+			R.id.display_mode_zoom_button to getString(R.string.stream_menu_display_zoom),
+			R.id.display_mode_stretch_button to getString(R.string.stream_menu_display_stretch))
+		val modeOrder = listOf(R.id.display_mode_normal_button, R.id.display_mode_zoom_button, R.id.display_mode_stretch_button)
+		val currentMode = binding.displayModeToggle.checkedButtonId
+
+		data class Item(val label: String, val action: () -> Unit)
+		val items = listOf(
+			Item(getString(R.string.stream_menu_resume)) { },
+			Item(getString(if(preferences.streamStats) R.string.stream_menu_stats_hide else R.string.stream_menu_stats_show)) {
+				preferences.streamStats = !preferences.streamStats
+				hud.reset()
+				updateHudVisibility()
+			},
+			Item(getString(R.string.stream_menu_display_mode, modeNames[currentMode] ?: "")) {
+				val next = modeOrder[(modeOrder.indexOf(currentMode) + 1) % modeOrder.size]
+				binding.displayModeToggle.check(next)
+				showStreamMenu()
+			},
+			Item(getString(R.string.stream_menu_subtitles, when
+			{
+				!preferences.subtitlesEnabled -> getString(R.string.stream_menu_subtitles_off)
+				preferences.subtitlesLanguage == "ar" -> "العربية"
+				else -> "کوردی"
+			})) {
+				// Off → Kurdish Sorani → Arabic → Off
+				when
+				{
+					!preferences.subtitlesEnabled -> { preferences.subtitlesEnabled = true; preferences.subtitlesLanguage = "ckb" }
+					preferences.subtitlesLanguage == "ckb" -> preferences.subtitlesLanguage = "ar"
+					else -> preferences.subtitlesEnabled = false
+				}
+				subtitles?.refresh(viewModel.session.state.value == StreamStateConnected)
+				showStreamMenu()
+			},
+			Item(getString(R.string.stream_menu_fix_picture)) { viewModel.session.session?.requestIdr() },
+			Item(getString(R.string.stream_menu_settings)) {
+				keepSessionOnPause = true
+				startActivity(Intent(this, SettingsActivity::class.java))
+			},
+			Item(getString(R.string.stream_menu_disconnect)) { finish() })
+
+		menuDialog = MaterialAlertDialogBuilder(this)
+			.setTitle(R.string.stream_menu_title)
+			.setItems(items.map { it.label }.toTypedArray()) { _, which ->
+				menuDialog = null
+				items[which].action()
+			}
+			.setOnDismissListener {
+				if(menuDialog?.isShowing != true)
+					menuDialog = null
+				hideSystemUI()
+			}
+			.create()
+		menuDialog?.show()
 	}
 
 	override fun onDestroy()
 	{
 		super.onDestroy()
+		uiVisibilityHandler.removeCallbacks(autoReconnectRunnable)
+		subtitles?.release()
+		subtitleOverlay?.release()
 		controlsJob?.cancel()
 	}
 
@@ -230,9 +401,31 @@ class StreamActivity : AppCompatActivity()
 				dialogContents = null
 		}
 
+	// Short network dropouts (Wi-Fi hiccup, switching to a cable) end the stream with an "unknown"
+	// reason: reconnect by itself a few times before asking, like the desktop app
+	private var autoReconnects = 0
+	private val autoReconnectRunnable = Runnable { reconnect() }
+
 	private fun stateChanged(state: StreamState)
 	{
-		binding.progressBar.visibility = if(state == StreamStateConnecting) View.VISIBLE else View.GONE
+		if(state == StreamStateConnected)
+			autoReconnects = 0
+		subtitles?.refresh(state == StreamStateConnected)
+		if(state is StreamStateQuit && state.reason.value in AUTO_RECONNECT_REASONS && autoReconnects < MAX_AUTO_RECONNECTS && !isFinishing)
+		{
+			autoReconnects++
+			binding.progressBar.isVisible = true
+			binding.statusTextView.isVisible = true
+			binding.statusTextView.text = getString(R.string.stream_status_reconnecting, autoReconnects, MAX_AUTO_RECONNECTS)
+			uiVisibilityHandler.removeCallbacks(autoReconnectRunnable)
+			uiVisibilityHandler.postDelayed(autoReconnectRunnable, AUTO_RECONNECT_DELAY_MS)
+			return
+		}
+
+		val connecting = state == StreamStateConnecting || state == StreamStatePsnConnecting
+		binding.progressBar.visibility = if(connecting) View.VISIBLE else View.GONE
+		binding.statusTextView.isVisible = connecting
+		binding.statusTextView.setText(if(state == StreamStatePsnConnecting) R.string.stream_status_psn else R.string.stream_status_connecting)
 
 		when(state)
 		{
@@ -265,6 +458,31 @@ class StreamActivity : AppCompatActivity()
 					}
 					else
 						finish()
+				}
+			}
+
+			is StreamStateConnectFailed ->
+			{
+				if(dialogContents != StreamQuitDialog)
+				{
+					dialog?.dismiss()
+					val dialog = MaterialAlertDialogBuilder(this)
+						.setMessage(state.message)
+						.setPositiveButton(R.string.action_reconnect) { _, _ ->
+							dialog = null
+							reconnect()
+						}
+						.setOnCancelListener {
+							dialog = null
+							finish()
+						}
+						.setNegativeButton(R.string.action_quit_session) { _, _ ->
+							dialog = null
+							finish()
+						}
+						.create()
+					dialogContents = StreamQuitDialog
+					dialog.show()
 				}
 			}
 

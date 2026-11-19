@@ -4,6 +4,9 @@
 
 #include "circular-buf.hpp"
 
+#include <atomic>
+#include <algorithm>
+
 #include <chiaki/log.h>
 #include <chiaki/thread.h>
 
@@ -34,6 +37,8 @@ struct AudioOutput
 	oboe::ManagedStream stream;
 	AudioOutputCallback stream_callback;
 	AudioBuffer buf;
+	// Bytes waiting in buf (pushed minus popped). Kept low so the sound stays in sync with the picture.
+	std::atomic<int64_t> queued{0};
 
 	AudioOutput() : stream_callback(this) {}
 };
@@ -85,6 +90,7 @@ extern "C" void android_chiaki_audio_output_frame(int16_t *buf, size_t samples_c
 
 	size_t buf_size = samples_count * sizeof(int16_t);
 	size_t pushed = ao->buf.Push(reinterpret_cast<uint8_t *>(buf), buf_size);
+	ao->queued += (int64_t)pushed;
 	if(pushed < buf_size)
 		CHIAKI_LOGW(ao->log, "Audio Output Buffer Overflow!");
 }
@@ -101,7 +107,22 @@ oboe::DataCallbackResult AudioOutputCallback::onAudioReady(oboe::AudioStream *st
 	size_t buf_size_requested = static_cast<size_t>(bytes_per_frame * num_frames);
 	auto buf = reinterpret_cast<uint8_t *>(audio_data);
 
+	// After a network stall audio arrives in a burst. Instead of letting it pile up (and play late from
+	// then on), skip the oldest queued audio so at most ~60 ms (12 chunks at 48 kHz stereo) wait.
+	// Done here, on the only consumer thread, because the buffer is single-producer/single-consumer.
+	const int64_t max_queued = 12 * BUFFER_CHUNK_SIZE + (int64_t)buf_size_requested;
+	int64_t drop = audio_output->queued.load() - max_queued;
+	while(drop > 0)
+	{
+		size_t n = audio_output->buf.Pop(buf, (size_t)std::min<int64_t>(drop, (int64_t)buf_size_requested));
+		if(n == 0)
+			break;
+		audio_output->queued -= (int64_t)n;
+		drop -= (int64_t)n;
+	}
+
 	size_t buf_size_delivered = audio_output->buf.Pop(buf, buf_size_requested);
+	audio_output->queued -= (int64_t)buf_size_delivered;
 	//CHIAKI_LOGW(audio_output->log, "Delivered %llu", (unsigned long long)buf_size_delivered);
 
 	if(buf_size_delivered < buf_size_requested)

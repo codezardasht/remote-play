@@ -8,6 +8,8 @@
 #include <chiaki/thread.h>
 #include <chiaki/log.h>
 
+#include <stdatomic.h>
+
 typedef struct AMediaCodec AMediaCodec;
 typedef struct ANativeWindow ANativeWindow;
 
@@ -23,6 +25,10 @@ typedef struct android_chiaki_video_decoder_t
 	int32_t target_width;
 	int32_t target_height;
 	ChiakiCodec target_codec;
+	// Stats for the in-stream HUD, written by the output thread and read from Java
+	atomic_uint frames_rendered; // total frames handed to the screen since the session started
+	atomic_int out_width;
+	atomic_int out_height;
 } AndroidChiakiVideoDecoder;
 
 ChiakiErrorCode android_chiaki_video_decoder_init(AndroidChiakiVideoDecoder *decoder, ChiakiLog *log, int32_t target_width, int32_t target_height, ChiakiCodec codec);

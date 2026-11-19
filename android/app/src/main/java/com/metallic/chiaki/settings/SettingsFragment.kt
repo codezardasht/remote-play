@@ -27,7 +27,8 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 		preferences.rumbleEnabledKey -> preferences.rumbleEnabled
 		preferences.motionEnabledKey -> preferences.motionEnabled
 		preferences.buttonHapticEnabledKey -> preferences.buttonHapticEnabled
-		else -> defValue
+		preferences.streamStatsKey -> preferences.streamStats
+		else -> if(key != null) preferences.getRawBoolean(key, defValue) else defValue
 	}
 
 	override fun putBoolean(key: String?, value: Boolean)
@@ -39,6 +40,8 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 			preferences.rumbleEnabledKey -> preferences.rumbleEnabled = value
 			preferences.motionEnabledKey -> preferences.motionEnabled = value
 			preferences.buttonHapticEnabledKey -> preferences.buttonHapticEnabled = value
+			preferences.streamStatsKey -> preferences.streamStats = value
+			else -> if(key != null) preferences.putRawBoolean(key, value)
 		}
 	}
 
@@ -48,7 +51,7 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 		preferences.fpsKey -> preferences.fps.value
 		preferences.bitrateKey -> preferences.bitrate?.toString() ?: ""
 		preferences.codecKey -> preferences.codec.value
-		else -> defValue
+		else -> preferences.getRawString(key, defValue)
 	}
 
 	override fun putString(key: String, value: String?)
@@ -71,6 +74,7 @@ class DataStore(val preferences: Preferences): PreferenceDataStore()
 				val codec = Preferences.Codec.values().firstOrNull { it.value == value } ?: return
 				preferences.codec = codec
 			}
+			else -> preferences.putRawString(key, value)
 		}
 	}
 }
@@ -129,6 +133,17 @@ class SettingsFragment: PreferenceFragmentCompat(), TitleFragment
 			registeredHostsPreference?.summary = getString(R.string.preferences_registered_hosts_summary, it)
 		})
 
+		preferenceScreen.findPreference<EditTextPreference>(Preferences.CLAUDE_API_KEY_KEY)?.let {
+			it.setOnBindEditTextListener { editText ->
+				editText.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+				editText.setSelection(editText.text.length)
+			}
+			it.summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
+				val key = pref.text ?: ""
+				if(key.isEmpty()) getString(R.string.preferences_claude_api_key_summary_empty)
+				else getString(R.string.preferences_claude_api_key_summary_set, key.takeLast(4))
+			}
+		}
 		preferenceScreen.findPreference<Preference>(getString(R.string.preferences_export_settings_key))?.setOnPreferenceClickListener { exportSettings(); true }
 		preferenceScreen.findPreference<Preference>(getString(R.string.preferences_import_settings_key))?.setOnPreferenceClickListener { importSettings(); true }
 	}

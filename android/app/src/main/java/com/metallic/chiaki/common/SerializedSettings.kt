@@ -58,15 +58,38 @@ class SerializedManualHost(
 	@Json(name = "server_mac") val serverMac: MacAddress?
 )
 
+// PSN login, carried over from the desktop app so Remote Play over the internet works without logging in again
+@JsonClass(generateAdapter = true)
+data class SerializedPsnLogin(
+	@Json(name = "account_id") val accountId: String?,
+	@Json(name = "auth_token") val authToken: String?,
+	@Json(name = "refresh_token") val refreshToken: String?,
+	@Json(name = "auth_token_expiry") val authTokenExpiry: String?
+)
+
+// Subtitle translation settings and Claude API key, same names as the desktop settings
+@JsonClass(generateAdapter = true)
+data class SerializedSubtitles(
+	@Json(name = "enabled") val enabled: Boolean = false,
+	@Json(name = "language") val language: String = "ckb",
+	@Json(name = "model") val model: String = Preferences.SUBTITLES_MODEL_DEFAULT,
+	@Json(name = "style") val style: Int = 0,
+	@Json(name = "instant") val instant: Boolean = true,
+	@Json(name = "show_original") val showOriginal: Boolean = false,
+	@Json(name = "claude_api_key") val claudeApiKey: String? = null
+)
+
 @JsonClass(generateAdapter = true)
 data class SerializedSettings(
 	@Json(name = "registered_hosts") val registeredHosts: List<SerializedRegisteredHost>,
-	@Json(name = "manual_hosts") val manualHosts: List<SerializedManualHost>
+	@Json(name = "manual_hosts") val manualHosts: List<SerializedManualHost>,
+	@Json(name = "psn") val psn: SerializedPsnLogin? = null,
+	@Json(name = "subtitles") val subtitles: SerializedSubtitles? = null
 )
 {
 	companion object
 	{
-		suspend fun fromDatabase(db: AppDatabase): SerializedSettings
+		suspend fun fromDatabase(db: AppDatabase, preferences: Preferences? = null): SerializedSettings
 		{
 			val registeredHosts = db.registeredHostDao().getAll().first()
 			val manualHosts = db.manualHostDao().getAll().first()
@@ -79,7 +102,8 @@ data class SerializedSettings(
 							registeredHosts.firstOrNull { it.id == registeredHostId }
 						}?.serverMac
 					)
-				}
+				},
+				preferences?.psnLogin
 			)
 		}
 	}
@@ -104,11 +128,12 @@ private fun Moshi.serializedSettingsAdapter() =
 private const val KEY_FORMAT = "format"
 private const val FORMAT = "chiaki-settings"
 private const val KEY_VERSION = "version"
-private const val VERSION = 2
+private const val VERSION = 3
+private val VERSIONS_SUPPORTED = 2..3
 private const val KEY_SETTINGS = "settings"
 
-suspend fun exportAllSettings(db: AppDatabase): String = withContext(Dispatchers.IO) {
-	val settings = SerializedSettings.fromDatabase(db)
+suspend fun exportAllSettings(db: AppDatabase, preferences: Preferences? = null): String = withContext(Dispatchers.IO) {
+	val settings = SerializedSettings.fromDatabase(db, preferences)
 	val buffer = Buffer()
 	val writer = JsonWriter.of(buffer)
 	val adapter = moshi().serializedSettingsAdapter()
@@ -130,7 +155,7 @@ fun exportAndShareAllSettings(activity: Activity, scope: CoroutineScope)
 	dir.mkdirs()
 	val file = File(dir, "chiaki-settings.json")
 	scope.launch {
-		val json = exportAllSettings(db)
+		val json = exportAllSettings(db, Preferences(activity))
 		withContext(Dispatchers.IO) {
 			file.writeText(json, Charsets.UTF_8)
 		}
@@ -145,7 +170,45 @@ fun exportAndShareAllSettings(activity: Activity, scope: CoroutineScope)
 	}
 }
 
-fun importSettingsFromUri(activity: Activity, uri: Uri, scope: CoroutineScope)
+fun importSettingsFromUri(activity: Activity, uri: Uri, scope: CoroutineScope, onDone: (() -> Unit)? = null)
+{
+	try
+	{
+		val inputStream = activity.contentResolver.openInputStream(uri) ?: throw IOException()
+		importSettingsFromSource(activity, inputStream.source().buffer(), scope, onDone)
+	}
+	catch(e: IOException)
+	{
+		e.printStackTrace()
+		MaterialAlertDialogBuilder(activity)
+			.setMessage(activity.getString(R.string.alert_message_import_failed, e.message ?: ""))
+			.setPositiveButton(R.string.action_import_failed_ack) { _, _ -> }
+			.create()
+			.show()
+	}
+}
+
+const val ACTION_IMPORT_SETTINGS = "com.metallic.chiaki.IMPORT_SETTINGS"
+const val EXTRA_SETTINGS_BASE64 = "settings_base64"
+
+/**
+ * Settings sent over ADB by scripts/desktop-settings-to-android.py --push
+ * (am start -a com.metallic.chiaki.IMPORT_SETTINGS --es settings_base64 <json as base64>).
+ * The usual confirmation dialog is shown before anything is imported.
+ */
+fun importSettingsFromIntent(activity: Activity, intent: Intent?, scope: CoroutineScope): Boolean
+{
+	if(intent?.action != ACTION_IMPORT_SETTINGS)
+		return false
+	val b64 = intent.getStringExtra(EXTRA_SETTINGS_BASE64) ?: return false
+	intent.removeExtra(EXTRA_SETTINGS_BASE64)
+	intent.action = null
+	val json = try { String(Base64.decode(b64, Base64.DEFAULT), Charsets.UTF_8) } catch(e: IllegalArgumentException) { return false }
+	importSettingsFromSource(activity, Buffer().writeUtf8(json), scope, null)
+	return true
+}
+
+private fun importSettingsFromSource(activity: Activity, buffer: okio.BufferedSource, scope: CoroutineScope, onDone: (() -> Unit)?)
 {
 	fun loadFail(msg: String)
 	{
@@ -158,8 +221,6 @@ fun importSettingsFromUri(activity: Activity, uri: Uri, scope: CoroutineScope)
 
 	try
 	{
-		val inputStream = activity.contentResolver.openInputStream(uri) ?: throw IOException()
-		val buffer = inputStream.source().buffer()
 		val reader = JsonReader.of(buffer)
 		val adapter = moshi().serializedSettingsAdapter()
 
@@ -183,7 +244,7 @@ fun importSettingsFromUri(activity: Activity, uri: Uri, scope: CoroutineScope)
 			throw IOException("Missing format, version or settings from JSON")
 		if(format != FORMAT)
 			throw IOException("Value of format is invalid")
-		if(version != VERSION) // Add migrations here when necessary
+		if(version !in VERSIONS_SUPPORTED) // Add migrations here when necessary
 			throw IOException("Value of version is invalid")
 
 		val settings = adapter.fromJsonValue(settingsValue) ?: throw JsonDataException("Failed to parse Settings JSON")
@@ -203,12 +264,26 @@ fun importSettingsFromUri(activity: Activity, uri: Uri, scope: CoroutineScope)
 					else
 						it.joinToString(separator = "") { host -> "\n - ${host.host} / ${host.serverMac ?: "unregistered"}" }
 				}
-			))
+			) + (if(settings.psn?.refreshToken != null) "\n\n" + activity.getString(R.string.alert_message_import_psn) else "")
+			  + (if(settings.subtitles != null) "\n" + activity.getString(R.string.alert_message_import_subtitles,
+					if(settings.subtitles.claudeApiKey != null) activity.getString(R.string.alert_message_import_subtitles_key) else "") else ""))
 			.setTitle(R.string.alert_title_import)
 			.setNegativeButton(R.string.action_import_cancel) { _, _ ->  }
 			.setPositiveButton(R.string.action_import_import) { _, _ ->
+				settings.psn?.let { if(it.refreshToken != null) Preferences(activity).psnLogin = it }
+				settings.subtitles?.let {
+					val p = Preferences(activity)
+					p.subtitlesEnabled = it.enabled
+					p.subtitlesLanguage = if(it.language == "ar") "ar" else "ckb"
+					p.subtitlesModel = it.model
+					p.subtitlesCoverStyle = it.style == 1
+					p.subtitlesInstant = it.instant
+					p.subtitlesShowOriginal = it.showOriginal
+					it.claudeApiKey?.let { key -> p.claudeApiKey = key }
+				}
 				scope.launch(Dispatchers.IO) {
 					getDatabase(activity).importDao().import(settings)
+					withContext(Dispatchers.Main) { onDone?.invoke() }
 				}
 			}
 			.create()

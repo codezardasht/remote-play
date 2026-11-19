@@ -29,10 +29,12 @@ class DisplayHostDiffCallback(val old: List<DisplayHost>, val new: List<DisplayH
 }
 
 class DisplayHostRecyclerViewAdapter(
+	val horizontal: Boolean,
 	val clickCallback: (DisplayHost) -> Unit,
 	val wakeupCallback: (DisplayHost) -> Unit,
 	val editCallback: (DisplayHost) -> Unit,
-	val deleteCallback: (DisplayHost) -> Unit
+	val deleteCallback: (DisplayHost) -> Unit,
+	val psnCallback: (DisplayHost) -> Unit
 ): RecyclerView.Adapter<DisplayHostRecyclerViewAdapter.ViewHolder>()
 {
 	var hosts: List<DisplayHost> = listOf()
@@ -45,8 +47,23 @@ class DisplayHostRecyclerViewAdapter(
 
 	class ViewHolder(val binding: ItemDisplayHostBinding): RecyclerView.ViewHolder(binding.root)
 
-	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int)
-		= ViewHolder(ItemDisplayHostBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder
+	{
+		val binding = ItemDisplayHostBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+		if(horizontal)
+		{
+			// TV: a row of large cards, like the console carousel on the desktop app
+			val dp = parent.resources.displayMetrics.density
+			binding.root.layoutParams = binding.root.layoutParams.also {
+				it.width = (420 * dp).toInt()
+				it.height = (300 * dp).toInt()
+			}
+		}
+		binding.root.setOnFocusChangeListener { v, hasFocus ->
+			v.animate().scaleX(if(hasFocus) 1.05f else 1f).scaleY(if(hasFocus) 1.05f else 1f).setDuration(180).start()
+		}
+		return ViewHolder(binding)
+	}
 
 	override fun getItemCount() = hosts.count()
 
@@ -95,16 +112,20 @@ class DisplayHostRecyclerViewAdapter(
 			if(canWakeup || canEditDelete)
 			{
 				it.menuButton.isVisible = true
+				// On TV the small menu button is hard to reach: long-press OK on the card opens the same menu
+				it.root.setOnLongClickListener { _ -> it.menuButton.performClick() }
 				it.menuButton.setOnClickListener { _ ->
 					val menu = PopupMenu(context, it.menuButton)
 					menu.menuInflater.inflate(R.menu.display_host, menu.menu)
 					menu.menu.findItem(R.id.action_wakeup).isVisible = canWakeup
+					menu.menu.findItem(R.id.action_connect_psn).isVisible = canWakeup
 					menu.menu.findItem(R.id.action_edit).isVisible = canEditDelete
 					menu.menu.findItem(R.id.action_delete).isVisible = canEditDelete
 					menu.setOnMenuItemClickListener { menuItem ->
 						when(menuItem.itemId)
 						{
 							R.id.action_wakeup -> wakeupCallback(host)
+							R.id.action_connect_psn -> psnCallback(host)
 							R.id.action_edit -> editCallback(host)
 							R.id.action_delete -> deleteCallback(host)
 							else -> return@setOnMenuItemClickListener false
@@ -118,6 +139,7 @@ class DisplayHostRecyclerViewAdapter(
 			{
 				it.menuButton.isGone = true
 				it.menuButton.setOnClickListener(null)
+				it.root.setOnLongClickListener(null)
 			}
 		}
 	}

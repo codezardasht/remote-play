@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Deep-blue backdrop like the desktop PSBackground: navy gradient with two soft glows -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape>
+            <gradient
+                android:angle="270"
+                android:startColor="@color/ps_navy_top"
+                android:centerColor="@color/ps_navy_mid"
+                android:centerY="0.45"
+                android:endColor="@color/ps_navy_bottom" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:centerX="0.18"
+                android:centerY="0.22"
+                android:gradientRadius="60%p"
+                android:startColor="#4D2A6CFF"
+                android:endColor="#002A6CFF" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <gradient
+                android:type="radial"
+                android:centerX="0.85"
+                android:centerY="0.80"
+                android:gradientRadius="65%p"
+                android:startColor="#2E00A0FF"
+                android:endColor="#0000A0FF" />
+        </shape>
+    </item>
+</layer-list>

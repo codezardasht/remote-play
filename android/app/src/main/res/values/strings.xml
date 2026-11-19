@@ -1,6 +1,6 @@
 <resources>
-    <string name="app_name">Chiaki</string>
-    <string name="title_main">Chiaki 千秋</string>
+    <string name="app_name">Remote Play</string>
+    <string name="title_main">Remote Play</string>
     <string name="title_settings">Settings</string>
     <string name="alert_message_standby_wakeup">The Console is currently in standby mode. Do you want to send a Wakeup packet instead of trying to connect immediately?</string>
     <string name="alert_message_session_quit">Session has quit: %s</string>
@@ -56,6 +56,12 @@
     <string name="alert_message_import">Registered Hosts: %s\n\nManual Hosts: %s</string>
     <string name="alert_message_import_failed">Failed to import settings from file:\n%s</string>
     <string name="action_import_failed_ack">Dismiss</string>
+    <string name="alert_message_import_psn">PSN login: yes (Remote Play over the internet)</string>
+    <string name="alert_message_import_subtitles">Subtitle translation settings: yes%s</string>
+    <string name="alert_message_import_subtitles_key"> (with Claude API key)</string>
+    <string name="preferences_stream_stats_key">stream_stats</string>
+    <string name="preferences_stream_stats_title">Show Stream Stats</string>
+    <string name="preferences_stream_stats_summary">FPS, resolution, packet loss, bitrate and the reason for any lag</string>
     <string name="title_edit_manual">Manual Console Entry</string>
     <string name="action_add_manual_save">Save</string>
     <string name="hint_add_manual_regist_host">Registered Console</string>
@@ -121,4 +127,80 @@
     <string name="preferences_fps_key">stream_fps</string>
     <string name="preferences_bitrate_key">stream_bitrate</string>
     <string name="preferences_codec_key">stream_codec</string>
+
+    <!-- In-stream stats HUD -->
+    <string name="hud_stable">Stable</string>
+    <string name="hud_unstable">Unstable</string>
+    <string name="hud_lag">Lag</string>
+    <string name="hud_loss">loss</string>
+    <string name="hud_local">Local</string>
+    <string name="hud_remote">Remote · PSN</string>
+    <string name="hud_issue_freeze">Freeze</string>
+    <string name="hud_issue_freeze_reason">No video arrived for a second: the network dropped out (Wi-Fi signal or interference).</string>
+    <string name="hud_issue_wifi_unstable">Unstable Wi-Fi</string>
+    <string name="hud_issue_wifi_unstable_reason">%1$.1f%% of packets lost. Move closer to the router, use 5 GHz, or use a cable.</string>
+    <string name="hud_issue_wifi_weak">Weak Wi-Fi</string>
+    <string name="hud_issue_wifi_weak_reason">%1$.1f%% of packets lost. Small stutters are possible.</string>
+    <string name="hud_issue_glitch">Picture glitch</string>
+    <string name="hud_issue_glitch_reason">%1$d video frame(s) lost on the way. Usually Wi-Fi interference or a busy network.</string>
+    <string name="hud_issue_low_fps">Low frame rate</string>
+    <string name="hud_issue_low_fps_reason">The PS5 is sending %1$d of %2$d FPS. A heavy game scene, or the console is limiting the stream.</string>
+
+    <string name="stream_status_connecting">Connecting…</string>
+    <string name="stream_status_reconnecting">Connection dropped. Reconnecting (%1$d of %2$d)…</string>
+    <string name="stream_status_psn">Connecting over the internet (PSN)…\nThis can take up to a minute.</string>
+
+    <!-- Connecting: local first (waking the console), then PSN -->
+    <string name="connect_checking">Looking for %s…</string>
+    <string name="connect_waking">Waking %s…</string>
+    <string name="connect_psn_finding">%s is not on this network. Finding it on PSN…</string>
+    <string name="connect_not_reachable_no_psn">%s does not answer on this network. Log in to PSN to play over the internet, or check that the console is on.</string>
+    <string name="connect_psn_list_failed">Could not get your consoles from PSN. Check the internet connection.</string>
+    <string name="connect_psn_no_consoles">No console with Remote Play enabled was found on your PSN account.</string>
+    <string name="connect_psn_not_found">%1$s was not found on PSN. Consoles on the account: %2$s</string>
+    <string name="action_connect_psn">Connect over internet (PSN)</string>
+    <string name="action_psn_login">PSN Login</string>
+    <string name="action_psn_logout">Log out of PSN</string>
+    <string name="psn_logout_confirm">Log out of PSN? Remote Play over the internet stops working until you log in again.</string>
+    <string name="psn_login_success">Logged in to PSN</string>
+    <string name="psn_login_failed">PSN login failed: %s</string>
+
+    <!-- Live subtitles (Claude) -->
+    <string name="preferences_category_title_subtitles">Translate Subtitles</string>
+    <string name="preferences_subtitles_enabled_title">Translate Subtitles</string>
+    <string name="preferences_subtitles_enabled_summary">Reads the game\'s English subtitles and shows them in Kurdish Sorani or Arabic, using Claude</string>
+    <string name="preferences_subtitles_language_title">Language</string>
+    <string name="preferences_subtitles_style_title">Style</string>
+    <string name="preferences_subtitles_instant_title">Instant</string>
+    <string name="preferences_subtitles_instant_summary">Show the words while Claude writes them</string>
+    <string name="preferences_subtitles_show_original_title">Show the English line too</string>
+    <string name="preferences_subtitles_show_original_summary">Cover style: a small copy of the original under the translation</string>
+    <string name="preferences_subtitles_model_title">Claude model</string>
+    <string name="preferences_claude_api_key_title">Claude API key</string>
+    <string name="preferences_claude_api_key_dialog">From console.anthropic.com → API Keys. Stored only on this device.</string>
+    <string name="preferences_claude_api_key_summary_empty">Not set</string>
+    <string name="preferences_claude_api_key_summary_set">Set (…%s)</string>
+    <string name="subtitles_missing_key">Add your Claude API key in Settings → Translate Subtitles</string>
+    <string name="subtitles_key_rejected">Claude API key not accepted. Check it in Settings.</string>
+    <string name="subtitles_model_forbidden">This API key may not use %s.</string>
+    <string name="subtitles_model_missing">%s is not available for this API key.</string>
+    <string name="subtitles_busy">Claude is busy right now, some lines are skipped.</string>
+    <string name="subtitles_too_many">Too many requests to Claude, some lines are skipped.</string>
+    <string name="subtitles_no_connection">No connection to Claude (%s)</string>
+    <string name="subtitles_error">Claude error %d</string>
+    <string name="stream_menu_subtitles">Subtitles: %s</string>
+    <string name="stream_menu_subtitles_off">Off</string>
+
+    <!-- In-game menu (Back on the remote, or Share + Options) -->
+    <string name="stream_menu_title">Remote Play</string>
+    <string name="stream_menu_resume">Resume</string>
+    <string name="stream_menu_stats_show">Show stream stats</string>
+    <string name="stream_menu_stats_hide">Hide stream stats</string>
+    <string name="stream_menu_display_mode">Picture: %s</string>
+    <string name="stream_menu_display_fit">Fit</string>
+    <string name="stream_menu_display_zoom">Zoom</string>
+    <string name="stream_menu_display_stretch">Stretch</string>
+    <string name="stream_menu_fix_picture">Fix picture (new keyframe)</string>
+    <string name="stream_menu_settings">Settings</string>
+    <string name="stream_menu_disconnect">Disconnect</string>
 </resources>

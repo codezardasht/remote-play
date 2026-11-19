@@ -5,13 +5,26 @@
         <item name="colorAccent">@color/accent</item>
         <item name="colorOnPrimary">#ffffff</item>
         <item name="colorSecondary">@color/accent</item>
-        <item name="colorOnSecondary">#000000</item>
-        <item name="android:statusBarColor">?attr/colorPrimarySurface</item>
-        <item name="android:navigationBarColor">?attr/colorPrimarySurface</item>
+        <item name="colorOnSecondary">#ffffff</item>
+        <item name="colorSurface">@color/primary</item>
+        <item name="colorOnSurface">@color/ps_text</item>
+        <item name="android:colorBackground">@color/ps_navy_mid</item>
+        <item name="android:windowBackground">@drawable/ps_background</item>
+        <item name="android:textColorPrimary">@color/ps_text</item>
+        <item name="android:textColorSecondary">@color/ps_text_dim</item>
+        <item name="colorControlActivated">@color/accent</item>
+        <item name="floatingActionButtonStyle">@style/AppTheme.Fab</item>
+        <item name="android:statusBarColor">@color/ps_navy_top</item>
+        <item name="android:navigationBarColor">@color/ps_navy_bottom</item>
         <item name="materialAlertDialogTheme">@style/AppTheme.AlertDialog</item>
         <item name="alertDialogTheme">@style/AppTheme.AlertDialog.NonMaterial</item>
 
         <item name="android:windowActivityTransitions">true</item>
+    </style>
+
+    <style name="AppTheme.Fab" parent="Widget.MaterialComponents.FloatingActionButton">
+        <item name="backgroundTint">@color/ps_fab_background</item>
+        <item name="tint">@color/ps_fab_tint</item>
     </style>
 
     <style name="AppTheme.Toolbar" parent="AppTheme">
@@ -24,8 +37,13 @@
         <item name="android:textColor">@color/floating_action_button_speed_dial_tint</item>
     </style>
 
-    <style name="AppTheme.AlertDialog" parent="Theme.MaterialComponents.Dialog.Alert">
-        <item name="android:textColorPrimary">@android:color/primary_text_dark</item>
+    <style name="AppTheme.AlertDialog" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <item name="android:textColorPrimary">@color/ps_text</item>
+        <item name="colorSurface">#102552</item>
+        <item name="colorOnSurface">@color/ps_text</item>
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorAccent">@color/accent</item>
+        <item name="shapeAppearanceMediumComponent">@style/AppTheme.DialogShape</item>
         <item name="materialButtonStyle">@style/AppTheme.AlertDialog.Button</item>
     </style>
 
@@ -36,7 +54,21 @@
     </style>
 
     <style name="AppTheme.AlertDialog.Button" parent="Widget.MaterialComponents.Button.TextButton.Dialog">
-        <item name="android:textColor">@color/accent</item>
+        <item name="android:textColor">@color/ps_dialog_button_text</item>
+        <item name="backgroundTint">@color/ps_dialog_button_background</item>
+        <item name="shapeAppearance">@style/AppTheme.PillShape</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+    </style>
+
+    <style name="AppTheme.DialogShape" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">18dp</item>
+    </style>
+
+    <style name="AppTheme.PillShape" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
     </style>
 
     <style name="MageTheme" parent="Theme.MaterialComponents.NoActionBar">
@@ -45,13 +77,13 @@
         <item name="colorAccent">@color/accent</item>
         <item name="colorOnPrimary">#ffffff</item>
         <item name="colorSecondary">@color/accent</item>
-        <item name="colorOnSecondary">#000000</item>
+        <item name="colorOnSecondary">#ffffff</item>
         <item name="colorPrimarySurface">@color/primary</item>
-        <item name="android:windowBackground">@color/primary</item>
+        <item name="android:windowBackground">@drawable/ps_background</item>
         <item name="android:statusBarColor">?attr/colorPrimarySurface</item>
         <item name="android:navigationBarColor">?attr/colorPrimarySurface</item>
-        <item name="colorControlNormal">@color/accent</item>
-        <item name="colorButtonNormal">@color/accent</item>
+        <item name="colorControlNormal">@color/ps_text_dim</item>
+        <item name="colorButtonNormal">@color/ps_blue</item>
         <item name="android:textAppearanceButton">@style/MageTheme.TextAppearanceButton</item>
         <item name="android:textColor">?attr/colorOnPrimary</item>
 

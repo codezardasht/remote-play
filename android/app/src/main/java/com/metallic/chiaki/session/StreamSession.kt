@@ -13,10 +13,16 @@ import com.metallic.chiaki.lib.*
 sealed class StreamState
 object StreamStateIdle: StreamState()
 object StreamStateConnecting: StreamState()
+/** Finding, waking and reaching the console through PSN (can take up to a minute) */
+object StreamStatePsnConnecting: StreamState()
+data class StreamStateConnectFailed(val message: String): StreamState()
 object StreamStateConnected: StreamState()
 data class StreamStateCreateError(val error: CreateError): StreamState()
 data class StreamStateQuit(val reason: QuitReason, val reasonString: String?): StreamState()
 data class StreamStateLoginPinRequest(val pinIncorrect: Boolean): StreamState()
+
+private const val ERR_HOST_DOWN = 8
+private const val ERR_HOST_UNREACH = 9
 
 class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, val logVerbose: Boolean, val input: StreamInput)
 {
@@ -38,11 +44,20 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 		}
 	}
 
+	private var psnThread: Thread? = null
+	private var started = false
+
 	fun shutdown()
 	{
-		session?.stop()
-		session?.dispose()
-		session = null
+		val session = session
+		session?.psnCancel()
+		psnThread?.join()
+		psnThread = null
+		if(started)
+			session?.stop()
+		session?.dispose(started)
+		started = false
+		this.session = null
 		_state.value = StreamStateIdle
 		//surfaceTexture?.release()
 	}
@@ -59,18 +74,49 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 		try
 		{
 			val session = Session(connectInfo, logManager.createNewFile().file.absolutePath, logVerbose)
-			_state.value = StreamStateConnecting
 			session.eventCallback = this::eventCallback
-			session.start()
+			this.session = session
+			if(connectInfo.duid != null)
+			{
+				_state.value = StreamStatePsnConnecting
+				psnThread = Thread({
+					val err = session.psnConnect(connectInfo.ps5)
+					synchronized(this) {
+						if(this.session !== session)
+							return@Thread
+						if(err.isSuccess)
+						{
+							_state.postValue(StreamStateConnecting)
+							started = true
+							session.start()
+						}
+						else
+							_state.postValue(StreamStateConnectFailed(psnErrorMessage(err)))
+					}
+				}, "PsnConnect").also { it.start() }
+			}
+			else
+			{
+				_state.value = StreamStateConnecting
+				started = true
+				session.start()
+			}
 			val surface = surface
 			if(surface != null)
 				session.setSurface(surface)
-			this.session = session
 		}
 		catch(e: CreateError)
 		{
 			_state.value = StreamStateCreateError(e)
 		}
+	}
+
+	private fun psnErrorMessage(err: ErrorCode) = when(err.value)
+	{
+		// CHIAKI_ERR_HOST_DOWN / CHIAKI_ERR_HOST_UNREACH / CHIAKI_ERR_CANCELED (lib/include/chiaki/common.h)
+		ERR_HOST_DOWN -> "The console did not answer over PSN. Check that it is in rest mode with \"Stay connected to the internet\" on, or switched on."
+		ERR_HOST_UNREACH -> "PSN found the console, but no network path to it opened (strict NAT on one side). Try again, or use a cable / another network."
+		else -> "Connecting over PSN failed: $err"
 	}
 
 	private fun eventCallback(event: Event)
@@ -103,6 +149,9 @@ class StreamSession(val connectInfo: ConnectInfo, val logManager: LogManager, va
 				val surface = holder.surface
 				this@StreamSession.surface = surface
 				session?.setSurface(surface)
+				// A new decoder started mid-stream (e.g. back from Settings) needs a keyframe to show anything
+				if(_state.value == StreamStateConnected)
+					session?.requestIdr()
 			}
 
 			override fun surfaceDestroyed(holder: SurfaceHolder)

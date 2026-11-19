@@ -9,6 +9,8 @@
 #include <chiaki/session.h>
 #include <chiaki/discoveryservice.h>
 #include <chiaki/regist.h>
+#include <chiaki/videoreceiver.h>
+#include <chiaki/remote/holepunch.h>
 
 #include <string.h>
 #include <linux/in.h>
@@ -159,6 +161,10 @@ typedef struct android_chiaki_session_t
 	AndroidChiakiVideoDecoder video_decoder;
 	AndroidChiakiAudioDecoder audio_decoder;
 	void *audio_output;
+
+	// Remote Play over PSN (NULL for a local connection). Owned by the ChiakiSession once it was initialized.
+	ChiakiHolepunchSession holepunch_session;
+	uint8_t psn_duid[32];
 } AndroidChiakiSession;
 
 static void android_chiaki_event_cb(ChiakiEvent *event, void *user)
@@ -226,6 +232,12 @@ JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject 
 	jbyteArray regist_key_array = E->GetObjectField(env, connect_info_obj, E->GetFieldID(env, connect_info_class, "registKey", "[B"));
 	jbyteArray morning_array = E->GetObjectField(env, connect_info_obj, E->GetFieldID(env, connect_info_class, "morning", "[B"));
 	jobject connect_video_profile_obj = E->GetObjectField(env, connect_info_obj, E->GetFieldID(env, connect_info_class, "videoProfile", "L"BASE_PACKAGE"/ConnectVideoProfile;"));
+	jstring duid_string = E->GetObjectField(env, connect_info_obj, E->GetFieldID(env, connect_info_class, "duid", "Ljava/lang/String;"));
+	jstring psn_token_string = E->GetObjectField(env, connect_info_obj, E->GetFieldID(env, connect_info_class, "psnToken", "Ljava/lang/String;"));
+	jbyteArray psn_account_id_array = E->GetObjectField(env, connect_info_obj, E->GetFieldID(env, connect_info_class, "psnAccountId", "[B"));
+	bool psn = duid_string != NULL;
+	uint8_t psn_duid[32] = { 0 };
+	ChiakiHolepunchSession holepunch_session = NULL;
 	jclass connect_video_profile_class = E->GetObjectClass(env, connect_video_profile_obj);
 
 	ChiakiConnectInfo connect_info = { 0 };
@@ -240,25 +252,67 @@ JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject 
 		goto beach;
 	}
 
-	if(E->GetArrayLength(env, regist_key_array) != sizeof(connect_info.regist_key))
+	jbyte *bytes;
+	if(psn)
 	{
-		CHIAKI_LOGE(log, "Regist Key passed from Java has invalid length");
-		err = CHIAKI_ERR_INVALID_DATA;
-		goto beach;
-	}
-	jbyte *bytes = E->GetByteArrayElements(env, regist_key_array, NULL);
-	memcpy(connect_info.regist_key, bytes, sizeof(connect_info.regist_key));
-	E->ReleaseByteArrayElements(env, regist_key_array, bytes, JNI_ABORT);
+		// Over PSN the console registers us inside the session, so no stored regist key / morning are needed
+		const char *duid_hex = E->GetStringUTFChars(env, duid_string, NULL);
+		bool duid_ok = duid_hex && strlen(duid_hex) == 64;
+		for(size_t i = 0; duid_ok && i < 32; i++)
+		{
+			unsigned int byte;
+			if(sscanf(duid_hex + i * 2, "%2x", &byte) != 1)
+				duid_ok = false;
+			psn_duid[i] = (uint8_t)byte;
+		}
+		if(duid_hex)
+			E->ReleaseStringUTFChars(env, duid_string, duid_hex);
+		if(!duid_ok || !psn_token_string || !psn_account_id_array
+			|| E->GetArrayLength(env, psn_account_id_array) != CHIAKI_PSN_ACCOUNT_ID_SIZE)
+		{
+			CHIAKI_LOGE(log, "PSN connect info passed from Java is invalid");
+			err = CHIAKI_ERR_INVALID_DATA;
+			goto beach;
+		}
+		bytes = E->GetByteArrayElements(env, psn_account_id_array, NULL);
+		memcpy(connect_info.psn_account_id, bytes, CHIAKI_PSN_ACCOUNT_ID_SIZE);
+		E->ReleaseByteArrayElements(env, psn_account_id_array, bytes, JNI_ABORT);
 
-	if(E->GetArrayLength(env, morning_array) != sizeof(connect_info.morning))
-	{
-		CHIAKI_LOGE(log, "Morning passed from Java has invalid length");
-		err = CHIAKI_ERR_INVALID_DATA;
-		goto beach;
+		const char *token = E->GetStringUTFChars(env, psn_token_string, NULL);
+		holepunch_session = chiaki_holepunch_session_init(token, log);
+		E->ReleaseStringUTFChars(env, psn_token_string, token);
+		if(!holepunch_session)
+		{
+			CHIAKI_LOGE(log, "Failed to create PSN holepunch session");
+			err = CHIAKI_ERR_MEMORY;
+			goto beach;
+		}
+		connect_info.holepunch_session = holepunch_session;
+		free(host_str);
+		connect_info.host = host_str = strdup("");
 	}
-	bytes = E->GetByteArrayElements(env, morning_array, NULL);
-	memcpy(connect_info.morning, bytes, sizeof(connect_info.morning));
-	E->ReleaseByteArrayElements(env, morning_array, bytes, JNI_ABORT);
+	else
+	{
+		if(E->GetArrayLength(env, regist_key_array) != sizeof(connect_info.regist_key))
+		{
+			CHIAKI_LOGE(log, "Regist Key passed from Java has invalid length");
+			err = CHIAKI_ERR_INVALID_DATA;
+			goto beach;
+		}
+		bytes = E->GetByteArrayElements(env, regist_key_array, NULL);
+		memcpy(connect_info.regist_key, bytes, sizeof(connect_info.regist_key));
+		E->ReleaseByteArrayElements(env, regist_key_array, bytes, JNI_ABORT);
+
+		if(E->GetArrayLength(env, morning_array) != sizeof(connect_info.morning))
+		{
+			CHIAKI_LOGE(log, "Morning passed from Java has invalid length");
+			err = CHIAKI_ERR_INVALID_DATA;
+			goto beach;
+		}
+		bytes = E->GetByteArrayElements(env, morning_array, NULL);
+		memcpy(connect_info.morning, bytes, sizeof(connect_info.morning));
+		E->ReleaseByteArrayElements(env, morning_array, bytes, JNI_ABORT);
+	}
 
 	connect_info.video_profile.width = (unsigned int)E->GetIntField(env, connect_video_profile_obj, E->GetFieldID(env, connect_video_profile_class, "width", "I"));
 	connect_info.video_profile.height = (unsigned int)E->GetIntField(env, connect_video_profile_obj, E->GetFieldID(env, connect_video_profile_class, "height", "I"));
@@ -271,6 +325,10 @@ JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject 
 	connect_info.video_profile.codec = (ChiakiCodec)target_value;
 
 	connect_info.video_profile_auto_downgrade = true;
+	// Same as the desktop default: report at most 5% loss so the console doesn't drop the bitrate on every Wi-Fi hiccup
+	connect_info.packet_loss_max = 0.05;
+	// TVs are often on Wi-Fi: when a frame can't be repaired, ask for a keyframe at once instead of showing a broken picture
+	connect_info.enable_idr_on_fec_failure = true;
 
 	session = CHIAKI_NEW(AndroidChiakiSession);
 	if(!session)
@@ -303,6 +361,10 @@ JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject 
 	android_chiaki_audio_decoder_set_cb(&session->audio_decoder, android_chiaki_audio_output_settings, android_chiaki_audio_output_frame, session->audio_output);
 
 	err = chiaki_session_init(&session->session, &connect_info, log);
+	// chiaki_session_init owns the holepunch session from here on (it frees it on failure too)
+	session->holepunch_session = err == CHIAKI_ERR_SUCCESS ? holepunch_session : NULL;
+	memcpy(session->psn_duid, psn_duid, sizeof(psn_duid));
+	holepunch_session = NULL;
 	if(err != CHIAKI_ERR_SUCCESS)
 	{
 		CHIAKI_LOGE(log, "JNI ChiakiSession failed to init");
@@ -354,6 +416,8 @@ JNIEXPORT void JNICALL JNI_FCN(sessionCreate)(JNIEnv *env, jobject obj, jobject 
 	chiaki_session_set_audio_sink(&session->session, &audio_sink);
 
 beach:
+	if(holepunch_session)
+		chiaki_holepunch_session_fini(holepunch_session);
 	if(!session && log)
 	{
 		android_chiaki_file_log_fini(log);
@@ -451,6 +515,129 @@ JNIEXPORT void JNICALL JNI_FCN(sessionSetControllerState)(JNIEnv *env, jobject o
 	controller_state.orient_z = E->GetFloatField(env, controller_state_java, session->java_controller_state_orient_z);
 	controller_state.orient_w = E->GetFloatField(env, controller_state_java, session->java_controller_state_orient_w);
 	chiaki_session_set_controller_state(&session->session, &controller_state);
+}
+
+// Stream stats for the in-stream HUD, written into a double[8]:
+// [0] frames shown so far, [1] decoded width, [2] decoded height, [3] packet loss (0..1),
+// [4] measured bitrate (Mbps), [5] video frames lost so far, [6] ping in ms (0 = unknown), [7] reserved
+JNIEXPORT void JNICALL JNI_FCN(sessionGetStats)(JNIEnv *env, jobject obj, jlong ptr, jdoubleArray out)
+{
+	AndroidChiakiSession *session = (AndroidChiakiSession *)ptr;
+	if(!session || !out || E->GetArrayLength(env, out) < 8)
+		return;
+	jdouble v[8] = { 0 };
+	v[0] = (jdouble)atomic_load(&session->video_decoder.frames_rendered);
+	v[1] = (jdouble)atomic_load(&session->video_decoder.out_width);
+	v[2] = (jdouble)atomic_load(&session->video_decoder.out_height);
+	ChiakiStreamConnection *sc = &session->session.stream_connection;
+	v[3] = sc->congestion_control.packet_loss;
+	v[4] = sc->measured_bitrate;
+	if(sc->video_receiver)
+		v[5] = (jdouble)chiaki_video_receiver_get_frames_lost_total(sc->video_receiver);
+	if(session->session.rtt_measured)
+		v[6] = (jdouble)((session->session.rtt_us + 500) / 1000);
+	E->SetDoubleArrayRegion(env, out, 0, 8, v);
+}
+
+// Ask the console for a fresh keyframe (e.g. after the picture was glitched)
+JNIEXPORT void JNICALL JNI_FCN(sessionRequestIdr)(JNIEnv *env, jobject obj, jlong ptr)
+{
+	AndroidChiakiSession *session = (AndroidChiakiSession *)ptr;
+	if(session)
+		chiaki_session_request_idr(&session->session);
+}
+
+// Remote Play over PSN, step 1 (blocking, call from a worker thread before sessionStart):
+// find the console through PSN, wake it and punch a hole for the control connection.
+// Returns CHIAKI_ERR_SUCCESS, HOST_DOWN (console did not answer) or HOST_UNREACH (hole punch failed).
+JNIEXPORT jint JNICALL JNI_FCN(sessionPsnConnect)(JNIEnv *env, jobject obj, jlong ptr, jboolean ps5)
+{
+	AndroidChiakiSession *session = (AndroidChiakiSession *)ptr;
+	if(!session || !session->holepunch_session)
+		return CHIAKI_ERR_INVALID_DATA;
+	ChiakiHolepunchSession hp = session->holepunch_session;
+	ChiakiLog *log = session->log;
+
+	ChiakiErrorCode err = chiaki_holepunch_upnp_discover_start(hp);
+	if(err != CHIAKI_ERR_SUCCESS)
+		CHIAKI_LOGW(log, "PSN: UPnP discovery did not start (%s), continuing without it", chiaki_error_string(err));
+	err = chiaki_holepunch_session_create(hp);
+	if(err != CHIAKI_ERR_SUCCESS)
+	{
+		CHIAKI_LOGE(log, "PSN: creating the session failed: %s", chiaki_error_string(err));
+		return err;
+	}
+	chiaki_holepunch_upnp_discover_wait(hp);
+	err = holepunch_session_create_offer(hp);
+	if(err != CHIAKI_ERR_SUCCESS)
+	{
+		CHIAKI_LOGE(log, "PSN: creating the offer failed: %s", chiaki_error_string(err));
+		return err;
+	}
+	err = chiaki_holepunch_session_start(hp, session->psn_duid, ps5 ? CHIAKI_HOLEPUNCH_CONSOLE_TYPE_PS5 : CHIAKI_HOLEPUNCH_CONSOLE_TYPE_PS4);
+	if(err != CHIAKI_ERR_SUCCESS)
+	{
+		CHIAKI_LOGE(log, "PSN: the console did not answer: %s", chiaki_error_string(err));
+		return err;
+	}
+	err = chiaki_holepunch_session_punch_hole(hp, CHIAKI_HOLEPUNCH_PORT_TYPE_CTRL);
+	if(err != CHIAKI_ERR_SUCCESS)
+		CHIAKI_LOGE(log, "PSN: punching the control hole failed: %s", chiaki_error_string(err));
+	else
+		CHIAKI_LOGI(log, "PSN: control connection ready");
+	return err;
+}
+
+// Abort a running sessionPsnConnect (safe from any thread)
+JNIEXPORT void JNICALL JNI_FCN(sessionPsnCancel)(JNIEnv *env, jobject obj, jlong ptr)
+{
+	AndroidChiakiSession *session = (AndroidChiakiSession *)ptr;
+	if(session && session->holepunch_session)
+		chiaki_holepunch_main_thread_cancel(session->holepunch_session, true);
+}
+
+// Consoles on the PSN account: String[] of "ps5|remoteplay(0/1)|duid hex|name", or null on error (blocking)
+JNIEXPORT jobjectArray JNICALL JNI_FCN(psnListDevices)(JNIEnv *env, jobject obj, jstring token_java, jboolean ps5)
+{
+	const char *token = E->GetStringUTFChars(env, token_java, NULL);
+	ChiakiHolepunchDeviceInfo *devices = NULL;
+	size_t count = 0;
+	ChiakiErrorCode err = chiaki_holepunch_list_devices(token, ps5 ? CHIAKI_HOLEPUNCH_CONSOLE_TYPE_PS5 : CHIAKI_HOLEPUNCH_CONSOLE_TYPE_PS4,
+			&devices, &count, &global_log);
+	E->ReleaseStringUTFChars(env, token_java, token);
+	if(err != CHIAKI_ERR_SUCCESS)
+	{
+		CHIAKI_LOGE(&global_log, "PSN: listing consoles failed: %s", chiaki_error_string(err));
+		return NULL;
+	}
+	jobjectArray result = E->NewObjectArray(env, (jsize)count, E->FindClass(env, "java/lang/String"), NULL);
+	for(size_t i = 0; i < count; i++)
+	{
+		char line[32 * 2 + sizeof(devices[i].device_name) + 16];
+		char hex[32 * 2 + 1];
+		for(size_t j = 0; j < 32; j++)
+			snprintf(hex + j * 2, 3, "%02x", devices[i].device_uid[j]);
+		char name[sizeof(devices[i].device_name) + 1];
+		memcpy(name, devices[i].device_name, sizeof(devices[i].device_name));
+		name[sizeof(devices[i].device_name)] = '\0';
+		snprintf(line, sizeof(line), "%d|%d|%s|%s", devices[i].type == CHIAKI_HOLEPUNCH_CONSOLE_TYPE_PS5 ? 1 : 0,
+				devices[i].remoteplay_enabled ? 1 : 0, hex, name);
+		jstring js = E->NewStringUTF(env, line);
+		E->SetObjectArrayElement(env, result, (jsize)i, js);
+		E->DeleteLocalRef(env, js);
+	}
+	chiaki_holepunch_free_device_list(&devices);
+	return result;
+}
+
+// Device id to put into the PSN login URL (the token must be bound to a duid for holepunch)
+JNIEXPORT jstring JNICALL JNI_FCN(psnGenerateDuid)(JNIEnv *env, jobject obj)
+{
+	char duid[CHIAKI_DUID_STR_SIZE];
+	size_t size = sizeof(duid);
+	if(chiaki_holepunch_generate_client_device_uid(duid, &size) != CHIAKI_ERR_SUCCESS)
+		return NULL;
+	return E->NewStringUTF(env, duid);
 }
 
 JNIEXPORT void JNICALL JNI_FCN(sessionSetLoginPin)(JNIEnv *env, jobject obj, jlong ptr, jstring pin_java)

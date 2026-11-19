@@ -69,7 +69,12 @@ data class ConnectInfo(
 	val host: String,
 	val registKey: ByteArray,
 	val morning: ByteArray,
-	val videoProfile: ConnectVideoProfile
+	val videoProfile: ConnectVideoProfile,
+	// Remote Play over the internet (PSN): the console's 32-byte device id as 64 hex chars, a fresh PSN
+	// access token and the 8-byte PSN account id. When duid is set, host/registKey/morning are not used.
+	val duid: String? = null,
+	val psnToken: String? = null,
+	val psnAccountId: ByteArray? = null
 ): Parcelable
 
 private class ChiakiNative
@@ -93,6 +98,12 @@ private class ChiakiNative
 		@JvmStatic external fun sessionSetSurface(ptr: Long, surface: Surface?)
 		@JvmStatic external fun sessionSetControllerState(ptr: Long, controllerState: ControllerState)
 		@JvmStatic external fun sessionSetLoginPin(ptr: Long, pin: String)
+		@JvmStatic external fun sessionGetStats(ptr: Long, out: DoubleArray)
+		@JvmStatic external fun sessionPsnConnect(ptr: Long, ps5: Boolean): Int
+		@JvmStatic external fun sessionPsnCancel(ptr: Long)
+		@JvmStatic external fun psnListDevices(token: String, ps5: Boolean): Array<String>?
+		@JvmStatic external fun psnGenerateDuid(): String?
+		@JvmStatic external fun sessionRequestIdr(ptr: Long)
 		@JvmStatic external fun discoveryServiceCreate(result: CreateResult, options: DiscoveryServiceOptions, javaService: DiscoveryService)
 		@JvmStatic external fun discoveryServiceFree(ptr: Long)
 		@JvmStatic external fun discoveryServiceWakeup(ptr: Long, host: String, userCredential: Long, ps5: Boolean)
@@ -320,6 +331,31 @@ data class RumbleEvent(val left: UByte, val right: UByte): Event()
 
 class CreateError(val errorCode: ErrorCode): Exception("Failed to create a native object: $errorCode")
 
+/** A console on the PSN account */
+data class PsnDevice(val ps5: Boolean, val remotePlayEnabled: Boolean, val duid: String, val name: String)
+
+object PsnNative
+{
+	/** Blocking (network). Null when PSN could not be reached or the token was rejected. */
+	fun listDevices(token: String, ps5: Boolean): List<PsnDevice>? =
+		ChiakiNative.psnListDevices(token, ps5)?.mapNotNull { line ->
+			val parts = line.split("|", limit = 4)
+			if(parts.size == 4) PsnDevice(parts[0] == "1", parts[1] == "1", parts[2], parts[3]) else null
+		}
+
+	fun generateDuid(): String? = ChiakiNative.psnGenerateDuid()
+}
+
+data class StreamStats(
+	val framesShown: Long,
+	val width: Int,
+	val height: Int,
+	val packetLoss: Double,
+	val bitrateMbps: Double,
+	val framesLost: Long,
+	val pingMs: Int
+)
+
 class Session(connectInfo: ConnectInfo, logFile: String?, logVerbose: Boolean)
 {
 	interface EventCallback
@@ -343,11 +379,12 @@ class Session(connectInfo: ConnectInfo, logFile: String?, logVerbose: Boolean)
 	fun start() = ErrorCode(ChiakiNative.sessionStart(nativePtr))
 	fun stop() = ErrorCode(ChiakiNative.sessionStop(nativePtr))
 
-	fun dispose()
+	fun dispose(started: Boolean = true)
 	{
 		if(nativePtr == 0L)
 			return
-		ChiakiNative.sessionJoin(nativePtr)
+		if(started)
+			ChiakiNative.sessionJoin(nativePtr)
 		ChiakiNative.sessionFree(nativePtr)
 		nativePtr = 0L
 	}
@@ -380,6 +417,44 @@ class Session(connectInfo: ConnectInfo, logFile: String?, logVerbose: Boolean)
 	fun setSurface(surface: Surface?)
 	{
 		ChiakiNative.sessionSetSurface(nativePtr, surface)
+	}
+
+	/** Snapshot of the stream stats, or null after the session was disposed */
+	fun stats(): StreamStats?
+	{
+		val ptr = nativePtr
+		if(ptr == 0L)
+			return null
+		val v = DoubleArray(8)
+		ChiakiNative.sessionGetStats(ptr, v)
+		return StreamStats(
+			framesShown = v[0].toLong(),
+			width = v[1].toInt(),
+			height = v[2].toInt(),
+			packetLoss = v[3],
+			bitrateMbps = v[4],
+			framesLost = v[5].toLong(),
+			pingMs = v[6].toInt())
+	}
+
+	/** PSN only: find, wake and reach the console through PSN. Blocks for up to about a minute. */
+	fun psnConnect(ps5: Boolean): ErrorCode
+	{
+		val ptr = nativePtr
+		return ErrorCode(if(ptr == 0L) -1 else ChiakiNative.sessionPsnConnect(ptr, ps5))
+	}
+
+	fun psnCancel()
+	{
+		val ptr = nativePtr
+		if(ptr != 0L)
+			ChiakiNative.sessionPsnCancel(ptr)
+	}
+
+	fun requestIdr()
+	{
+		if(nativePtr != 0L)
+			ChiakiNative.sessionRequestIdr(nativePtr)
 	}
 
 	fun setControllerState(controllerState: ControllerState)

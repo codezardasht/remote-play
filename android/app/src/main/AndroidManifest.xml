@@ -16,6 +16,8 @@
 
     <application
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:isGame="true"
@@ -37,12 +39,18 @@
         </provider>
 
         <activity android:name=".main.MainActivity"
+            android:launchMode="singleTop"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+            <!-- Settings import from the desktop app over ADB (asks before importing) -->
+            <intent-filter>
+                <action android:name="com.metallic.chiaki.IMPORT_SETTINGS" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
@@ -53,6 +61,10 @@
 
         <activity
             android:name=".settings.SettingsActivity" />
+
+        <activity
+            android:name=".main.PsnLoginActivity"
+            android:theme="@style/AppTheme" />
 
         <activity
             android:name=".regist.RegistActivity"

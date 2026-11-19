@@ -19,6 +19,9 @@ import kotlin.math.min
 
 class Preferences(context: Context)
 {
+	// PSN login and API keys live in their own file, which is left out of Android backups
+	private val secretPreferences = context.getSharedPreferences("secrets", Context.MODE_PRIVATE)
+
 	enum class Resolution(val value: String, @StringRes val title: Int, val preset: VideoResolutionPreset)
 	{
 		RES_360P("360p", R.string.preferences_resolution_title_360p, VideoResolutionPreset.RES_360P),
@@ -41,6 +44,16 @@ class Preferences(context: Context)
 
 	companion object
 	{
+		// Live subtitle translation with Claude (same settings as the desktop app)
+		const val SUBTITLES_ENABLED_KEY = "subtitles_enabled"
+		const val SUBTITLES_LANGUAGE_KEY = "subtitles_language"   // "ckb" (Kurdish Sorani) or "ar"
+		const val SUBTITLES_MODEL_KEY = "subtitles_model"
+		const val SUBTITLES_STYLE_KEY = "subtitles_style"         // "0" clean (above the English), "1" cover
+		const val SUBTITLES_INSTANT_KEY = "subtitles_instant"
+		const val SUBTITLES_SHOW_ORIGINAL_KEY = "subtitles_show_original"
+		const val CLAUDE_API_KEY_KEY = "claude_api_key"
+		const val SUBTITLES_MODEL_DEFAULT = "claude-haiku-5-5"
+
 		val resolutionDefault = Resolution.RES_720P
 		val resolutionAll = Resolution.values()
 		val fpsDefault = FPS.FPS_60
@@ -136,5 +149,62 @@ class Preferences(context: Context)
 			it
 		else
 			it.copy(bitrate = bitrate)
+	}
+
+	val streamStatsKey get() = resources.getString(R.string.preferences_stream_stats_key)
+	var streamStats
+		get() = sharedPreferences.getBoolean(streamStatsKey, true)
+		set(value) { sharedPreferences.edit().putBoolean(streamStatsKey, value).apply() }
+
+	var psnLogin: SerializedPsnLogin?
+		get() = secretPreferences.getString("psn_refresh_token", null)?.let {
+			SerializedPsnLogin(
+				accountId = secretPreferences.getString("psn_account_id", null),
+				authToken = secretPreferences.getString("psn_auth_token", null),
+				refreshToken = it,
+				authTokenExpiry = secretPreferences.getString("psn_auth_token_expiry", null))
+		}
+		set(value) {
+			secretPreferences.edit()
+				.putString("psn_account_id", value?.accountId)
+				.putString("psn_auth_token", value?.authToken)
+				.putString("psn_refresh_token", value?.refreshToken)
+				.putString("psn_auth_token_expiry", value?.authTokenExpiry)
+				.apply()
+		}
+
+	// Live subtitle translation with Claude: see the subtitle constants in the companion object
+
+	var subtitlesEnabled
+		get() = sharedPreferences.getBoolean(SUBTITLES_ENABLED_KEY, false)
+		set(value) { sharedPreferences.edit().putBoolean(SUBTITLES_ENABLED_KEY, value).apply() }
+	var subtitlesLanguage
+		get() = sharedPreferences.getString(SUBTITLES_LANGUAGE_KEY, "ckb") ?: "ckb"
+		set(value) { sharedPreferences.edit().putString(SUBTITLES_LANGUAGE_KEY, value).apply() }
+	var subtitlesModel
+		get() = sharedPreferences.getString(SUBTITLES_MODEL_KEY, SUBTITLES_MODEL_DEFAULT) ?: SUBTITLES_MODEL_DEFAULT
+		set(value) { sharedPreferences.edit().putString(SUBTITLES_MODEL_KEY, value).apply() }
+	var subtitlesCoverStyle
+		get() = sharedPreferences.getString(SUBTITLES_STYLE_KEY, "0") == "1"
+		set(value) { sharedPreferences.edit().putString(SUBTITLES_STYLE_KEY, if(value) "1" else "0").apply() }
+	var subtitlesInstant
+		get() = sharedPreferences.getBoolean(SUBTITLES_INSTANT_KEY, true)
+		set(value) { sharedPreferences.edit().putBoolean(SUBTITLES_INSTANT_KEY, value).apply() }
+	var subtitlesShowOriginal
+		get() = sharedPreferences.getBoolean(SUBTITLES_SHOW_ORIGINAL_KEY, false)
+		set(value) { sharedPreferences.edit().putBoolean(SUBTITLES_SHOW_ORIGINAL_KEY, value).apply() }
+	var claudeApiKey
+		get() = secretPreferences.getString(CLAUDE_API_KEY_KEY, "")?.trim() ?: ""
+		set(value) { secretPreferences.edit().putString(CLAUDE_API_KEY_KEY, value.trim()).apply() }
+
+	// Settings without their own property (settings screen fallback)
+	fun getRawBoolean(key: String, def: Boolean) = sharedPreferences.getBoolean(key, def)
+	fun putRawBoolean(key: String, value: Boolean) = sharedPreferences.edit().putBoolean(key, value).apply()
+	fun getRawString(key: String, def: String?) =
+		if(key == CLAUDE_API_KEY_KEY) claudeApiKey else sharedPreferences.getString(key, def)
+	fun putRawString(key: String, value: String?)
+	{
+		if(key == CLAUDE_API_KEY_KEY) claudeApiKey = value ?: ""
+		else sharedPreferences.edit().putString(key, value).apply()
 	}
 }
