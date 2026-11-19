@@ -360,23 +360,19 @@ Item {
             return Qt.rect((vw - w) / 2, (vh - h) / 2, w, h);
         }
 
-        // The game's line in window coordinates: the line this translation is for, joined with where text is now
+        // Position is decided once, when a line is shown, and then stays put (no following the live text,
+        // which shifts by a few pixels every look and made the translation jump).
+        // lockedBox: the game's line this translation is for, as fractions of the video (cover style)
+        // anchorBottom: where our text ends, as a fraction of the video height (clean style); kept for the
+        // whole scene and only moved when the game's line would overlap it or the layout clearly changed
+        property rect lockedBox: Qt.rect(0, 0, 0, 0)
+        property real anchorBottom: -1
         readonly property rect sourceRect: {
-            if (!translator)
-                return Qt.rect(0, 0, 0, 0);
-            let b = translator.box;
-            const live = translator.liveBox;
-            if (b.width <= 0)
-                b = live;
+            const b = lockedBox;
             if (b.width <= 0)
                 return Qt.rect(0, 0, 0, 0);
-            let l = b.x, t = b.y, r = b.x + b.width, btm = b.y + b.height;
-            if (live.width > 0) {
-                l = Math.min(l, live.x); t = Math.min(t, live.y);
-                r = Math.max(r, live.x + live.width); btm = Math.max(btm, live.y + live.height);
-            }
             const v = videoRect;
-            return Qt.rect(v.x + l * v.width, v.y + t * v.height, (r - l) * v.width, (btm - t) * v.height);
+            return Qt.rect(v.x + b.x * v.width, v.y + b.y * v.height, b.width * v.width, b.height * v.height);
         }
         readonly property bool hasSource: sourceRect.width > 0
         readonly property real maxTextWidth: videoRect.width * 0.80
@@ -388,6 +384,16 @@ Item {
                 shown = false;
                 return;
             }
+            let b = translator.box;
+            if (b.width <= 0)
+                b = translator.liveBox;
+            lockedBox = Qt.rect(b.x, b.y, b.width, b.height);
+            if (b.width > 0) {
+                const englishTop = b.y;
+                if (anchorBottom < 0 || englishTop < anchorBottom || englishTop - anchorBottom > 0.08)
+                    anchorBottom = englishTop;
+            }
+            anchorResetTimer.stop();
             shown = true;
             shownAt = Date.now();
             subtitleHideTimer.interval = Math.max(3000, Math.min(9000, 2200 + translator.text.length * 80));
@@ -412,7 +418,17 @@ Item {
 
         Timer {
             id: subtitleHideTimer
-            onTriggered: subtitleBar.shown = false
+            onTriggered: {
+                subtitleBar.shown = false;
+                anchorResetTimer.restart();
+            }
+        }
+
+        // After a long pause the next scene may put its subtitles elsewhere: place the next line afresh
+        Timer {
+            id: anchorResetTimer
+            interval: 6000
+            onTriggered: subtitleBar.anchorBottom = -1
         }
 
         Item {
@@ -424,19 +440,21 @@ Item {
                                                                     : subtitleColumn.height + 8
             x: {
                 const v = subtitleBar.videoRect;
-                const cx = subtitleBar.hasSource ? subtitleBar.sourceRect.x + subtitleBar.sourceRect.width / 2 : v.x + v.width / 2;
+                // Clean: always centred on the picture. Cover: centred on that line's English text.
+                const cx = subtitleBar.coverStyle && subtitleBar.hasSource ? subtitleBar.sourceRect.x + subtitleBar.sourceRect.width / 2
+                                                                           : v.x + v.width / 2;
                 return Math.max(v.x + 8, Math.min(v.x + v.width - width - 8, cx - width / 2));
             }
             y: {
                 const v = subtitleBar.videoRect;
                 const src = subtitleBar.sourceRect;
                 let top;
-                if (!subtitleBar.hasSource)
-                    top = v.y + v.height * 0.93 - height;
-                else if (subtitleBar.coverStyle)
+                if (subtitleBar.coverStyle && subtitleBar.hasSource)
                     top = src.y + src.height / 2 - height / 2;
+                else if (subtitleBar.anchorBottom >= 0)
+                    top = v.y + subtitleBar.anchorBottom * v.height - 4 - height;   // bottom stays fixed, grows upward
                 else
-                    top = src.y - 4 - height;   // just above the game's English line
+                    top = v.y + v.height * 0.86 - height;
                 return Math.max(v.y + 8, Math.min(v.y + v.height - height - 4, top));
             }
             opacity: subtitleBar.allowed && subtitleBar.shown && !!subtitleBar.translator && subtitleBar.translator.text.length > 0 ? 1 : 0
