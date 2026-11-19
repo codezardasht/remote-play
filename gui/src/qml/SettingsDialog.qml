@@ -2089,7 +2089,7 @@ DialogView {
                         C.ComboBox {
                             Layout.preferredWidth: 400
                             model: [qsTr("Clean: subtitle text just above the game's line"),
-                                    qsTr("Cover: a slim strip over the game's English line")]
+                                    qsTr("Cover: hide the game's English line in the picture")]
                             currentIndex: Chiaki.settings.subtitlesStyle
                             onActivated: index => Chiaki.settings.subtitlesStyle = index
                         }

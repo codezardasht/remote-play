@@ -177,6 +177,7 @@ void SubtitleTranslator::refresh(bool session_running)
     next.model = settings->GetSubtitlesModel();
     next.language = settings->GetSubtitlesLanguage();
     next.instant = settings->GetSubtitlesInstant();
+    next.cover = settings->GetSubtitlesStyle() == 1;
     {
         QMutexLocker lock(&config_mutex);
         cfg = next;
@@ -197,6 +198,7 @@ void SubtitleTranslator::refresh(bool session_running)
             shown_seq = next_seq;   // answers still on the way for the old stream are dropped
             clearSubtitle();
             setLiveBox(QRectF());
+            setCover(QString(), QRectF());
         }
         emit activeChanged();
     }
@@ -251,12 +253,11 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
         }
         sw = downloaded;
     }
+    struct FreeFrame { AVFrame *&f; ~FreeFrame() { av_frame_free(&f); } } free_downloaded{ downloaded };
 
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(sw->format));
-    if (!desc || desc->nb_components < 1 || (desc->flags & (AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_RGB))) {
-        av_frame_free(&downloaded);
+    if (!desc || desc->nb_components < 1 || (desc->flags & (AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_RGB)))
         return;
-    }
 
     const AVComponentDescriptor &luma = desc->comp[0];
     const int width = std::min(frame->width, sw->width);
@@ -266,10 +267,8 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
     const int y0 = int(height * kAreaTop);
     const int cw = x1 - x0;
     const int ch = height - y0;
-    if (cw < 64 || ch < 32) {
-        av_frame_free(&downloaded);
+    if (cw < 64 || ch < 32)
         return;
-    }
 
     // Brightness of the subtitle area as an 8-bit greyscale picture (full range)
     QImage area(cw, ch, QImage::Format_Grayscale8);
@@ -287,7 +286,6 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
             dst[x] = uchar(std::clamp(v, 0, 255));
         }
     }
-    av_frame_free(&downloaded);
 
     // Text = bright pixels next to a dark outline or shadow. Mark 4x4 cells that contain such pixels.
     const int mw = (cw + kCell - 1) / kCell;
@@ -321,7 +319,7 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
         if (++empty_samples == 2) {
             sent_mask.clear();
             last_live_box = QRectF();
-            QMetaObject::invokeMethod(this, [this]() { setLiveBox(QRectF()); emit sourceCleared(); }, Qt::QueuedConnection);
+            QMetaObject::invokeMethod(this, [this]() { setLiveBox(QRectF()); setCover(QString(), QRectF()); emit sourceCleared(); }, Qt::QueuedConnection);
         }
         prev_mask = std::move(mask);
         return;
@@ -352,6 +350,15 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
     if (moved(text_box, last_live_box)) {
         last_live_box = text_box;
         QMetaObject::invokeMethod(this, [this, text_box]() { setLiveBox(text_box); }, Qt::QueuedConnection);
+    }
+
+    // Cover style: a small picture of the scene around the English line, with the text left out.
+    // Shown blurred over the English, it makes the line disappear into the picture.
+    if (config().cover) {
+        const QRect text_px(x0 + min_cx * kCell, y0 + min_cy * kCell, (max_cx - min_cx + 1) * kCell, (max_cy - min_cy + 1) * kCell);
+        QRectF patch_box;
+        const QString patch = scenePatch(sw, desc, width, height, text_px, full_range, patch_box);
+        QMetaObject::invokeMethod(this, [this, patch, patch_box]() { setCover(patch, patch_box); }, Qt::QueuedConnection);
     }
 
     const double iou_prev = iou(mask, prev_mask);
@@ -396,6 +403,106 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
 
     const qint64 seen_ms = now;
     QMetaObject::invokeMethod(this, [this, data, media_type, text_box, seen_ms]() { sendImage(data, media_type, text_box, seen_ms); }, Qt::QueuedConnection);
+}
+
+// Average colour of the scene around (and behind) the text, as a tiny picture: data URL of a PNG.
+// Pixels that look like the text or its outline are left out, so the patch shows the scene, not the letters.
+QString SubtitleTranslator::scenePatch(const AVFrame *sw, const AVPixFmtDescriptor *desc, int width, int height,
+                                       const QRect &text_px, bool full_range, QRectF &patch_box)
+{
+    if (desc->nb_components < 3)
+        return QString();
+    const int pad_x = std::max(16, int(height * 0.03));
+    const int pad_y = std::max(10, int(height * 0.016));
+    const QRect region = text_px.adjusted(-pad_x, -pad_y, pad_x, pad_y).intersected(QRect(0, 0, width, height));
+    if (region.width() < 8 || region.height() < 4)
+        return QString();
+    patch_box = QRectF(double(region.x()) / width, double(region.y()) / height,
+                       double(region.width()) / width, double(region.height()) / height);
+
+    auto sample = [&](int c, int x, int y) -> int {
+        const AVComponentDescriptor &d = desc->comp[c];
+        if (c > 0) {
+            x >>= desc->log2_chroma_w;
+            y >>= desc->log2_chroma_h;
+        }
+        const uint8_t *p = sw->data[d.plane] + qint64(y) * sw->linesize[d.plane] + d.offset + qint64(x) * d.step;
+        const int v = d.depth > 8 ? (AV_RN16(p) >> d.shift) & ((1 << d.depth) - 1) : (p[0] >> d.shift);
+        return v >> std::max(0, d.depth - 8);
+    };
+
+    const int pw = std::clamp(region.width() / 24, 8, 64);
+    const int ph = std::clamp(region.height() / 12, 3, 12);
+    std::vector<double> sum(size_t(pw) * ph * 3, 0.0);
+    std::vector<int> count(size_t(pw) * ph, 0);
+    for (int y = region.top(); y <= region.bottom(); y += 2) {
+        const int cy = std::min(ph - 1, (y - region.top()) * ph / region.height());
+        for (int x = region.left(); x <= region.right(); x += 2) {
+            const int luma = sample(0, x, y);
+            const int luma_full = full_range ? luma : (luma - 16) * 255 / 219;
+            if (text_px.contains(x, y) && (luma_full >= 160 || luma_full <= 70))
+                continue;   // letters and their outline
+            const int cx = std::min(pw - 1, (x - region.left()) * pw / region.width());
+            const size_t i = size_t(cy) * pw + cx;
+            sum[i * 3] += luma;
+            sum[i * 3 + 1] += sample(1, x, y);
+            sum[i * 3 + 2] += sample(2, x, y);
+            count[i]++;
+        }
+    }
+
+    // Cells with nothing but text: take the average of the cells that have scene in them
+    double avg[3] = { 0, 0, 0 };
+    int filled = 0;
+    for (size_t i = 0; i < count.size(); i++) {
+        if (!count[i])
+            continue;
+        for (int k = 0; k < 3; k++)
+            avg[k] += sum[i * 3 + k] / count[i];
+        filled++;
+    }
+    if (!filled)
+        return QString();
+    for (double &a : avg)
+        a /= filled;
+
+    // YUV to RGB (BT.709 for HD streams, BT.601 otherwise)
+    const bool bt709 = sw->colorspace == AVCOL_SPC_BT709 || (sw->colorspace == AVCOL_SPC_UNSPECIFIED && height >= 720);
+    const double kr = bt709 ? 0.2126 : 0.299, kb = bt709 ? 0.0722 : 0.114;
+    QImage img(pw, ph, QImage::Format_RGB888);
+    for (int cy = 0; cy < ph; cy++) {
+        uchar *row = img.scanLine(cy);
+        for (int cx = 0; cx < pw; cx++) {
+            const size_t i = size_t(cy) * pw + cx;
+            const double yv = count[i] ? sum[i * 3] / count[i] : avg[0];
+            const double uv = count[i] ? sum[i * 3 + 1] / count[i] : avg[1];
+            const double vv = count[i] ? sum[i * 3 + 2] / count[i] : avg[2];
+            const double yn = full_range ? yv / 255.0 : (yv - 16) / 219.0;
+            const double cb = full_range ? (uv - 128) / 255.0 : (uv - 128) / 224.0;
+            const double cr = full_range ? (vv - 128) / 255.0 : (vv - 128) / 224.0;
+            const double r = yn + 2 * (1 - kr) * cr;
+            const double b = yn + 2 * (1 - kb) * cb;
+            const double g = (yn - kr * r - kb * b) / (1 - kr - kb);
+            row[cx * 3] = uchar(std::clamp(int(r * 255 + 0.5), 0, 255));
+            row[cx * 3 + 1] = uchar(std::clamp(int(g * 255 + 0.5), 0, 255));
+            row[cx * 3 + 2] = uchar(std::clamp(int(b * 255 + 0.5), 0, 255));
+        }
+    }
+    QByteArray png;
+    QBuffer buffer(&png);
+    buffer.open(QIODevice::WriteOnly);
+    if (!img.save(&buffer, "PNG"))
+        return QString();
+    return QStringLiteral("data:image/png;base64,") + QString::fromLatin1(png.toBase64());
+}
+
+void SubtitleTranslator::setCover(const QString &image, const QRectF &box)
+{
+    if (cover_image == image && cover_box == box)
+        return;
+    cover_image = image;
+    cover_box = box;
+    emit coverChanged();
 }
 
 void SubtitleTranslator::sendImage(const QByteArray &image, const QString &media_type, const QRectF &box, qint64 seen_ms)

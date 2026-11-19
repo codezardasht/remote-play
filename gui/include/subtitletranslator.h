@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QImage>
 #include <QRectF>
+#include <QRect>
 #include <QMutex>
 #include <QElapsedTimer>
 #include <QAtomicInteger>
@@ -16,6 +17,7 @@
 
 extern "C" {
 #include <libavutil/frame.h>
+#include <libavutil/pixdesc.h>
 }
 
 class Settings;
@@ -44,6 +46,9 @@ class SubtitleTranslator : public QObject
     Q_PROPERTY(QRectF box READ box NOTIFY subtitleChanged)
     // Where the game's subtitle text is right now (empty when there is none)
     Q_PROPERTY(QRectF liveBox READ liveBox NOTIFY liveBoxChanged)
+    // Cover style: a tiny picture of the scene around the game's line (shown blurred over it) and where it goes
+    Q_PROPERTY(QString coverImage READ coverImage NOTIFY coverChanged)
+    Q_PROPERTY(QRectF coverBox READ coverBox NOTIFY coverChanged)
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(bool statusIsError READ statusIsError NOTIFY statusChanged)
@@ -70,6 +75,8 @@ public:
     int serial() const { return current_serial; }
     QRectF box() const { return current_box; }
     QRectF liveBox() const { return live_box; }
+    QString coverImage() const { return cover_image; }
+    QRectF coverBox() const { return cover_box; }
     bool active() const { return is_active; }
     QString status() const { return status_text; }
     bool statusIsError() const { return status_error; }
@@ -88,6 +95,7 @@ signals:
     void sourceCleared();
     void activeChanged();
     void liveBoxChanged();
+    void coverChanged();
     void statusChanged();
     void usageChanged();
 
@@ -98,6 +106,7 @@ private:
         QString model;
         QString language;   // "ckb" or "ar"
         bool instant = true; // show words while they are written
+        bool cover = false;  // cover style: build the scene patch
     };
 
     void processFrame(AVFrame *frame);          // worker thread
@@ -111,6 +120,9 @@ private:
     void addCost(const Config &c, double in_tokens, double out_tokens);
     void reportHttpError(int http, const QJsonObject &json, const Config &c);
     void setLiveBox(const QRectF &box);
+    void setCover(const QString &image, const QRectF &box);
+    QString scenePatch(const AVFrame *sw, const AVPixFmtDescriptor *desc, int width, int height,
+                       const QRect &text_px, bool full_range, QRectF &patch_box);
     void setStatus(const QString &text, bool error);
     void clearSubtitle();
     QByteArray buildRequest(const Config &cfg, const QByteArray &image, const QString &media_type) const;
@@ -145,6 +157,8 @@ private:
     QRectF pending_box;
     QRectF current_box;
     QRectF live_box;
+    QString cover_image;
+    QRectF cover_box;
     QStringList recent_lines;   // "speaker: original => translation", for consistent names and wording
     QString current_text;
     bool current_complete = true;

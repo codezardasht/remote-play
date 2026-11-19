@@ -449,6 +449,39 @@ Item {
             onTriggered: subtitleBar.anchorBottom = -1
         }
 
+        // Cover style: the scene around the English line, blurred, laid over it. It shows as soon as the
+        // English appears (before the translation arrives), so the English line disappears into the picture.
+        Item {
+            id: coverPatch
+            readonly property rect box: subtitleBar.translator ? subtitleBar.translator.coverBox : Qt.rect(0, 0, 0, 0)
+            readonly property bool active: subtitleBar.allowed && subtitleBar.coverStyle && !!subtitleBar.translator
+                                           && subtitleBar.translator.coverImage.length > 0 && box.width > 0
+            x: subtitleBar.videoRect.x + box.x * subtitleBar.videoRect.width
+            y: subtitleBar.videoRect.y + box.y * subtitleBar.videoRect.height
+            width: box.width * subtitleBar.videoRect.width
+            height: box.height * subtitleBar.videoRect.height
+            opacity: active ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+
+            Image {
+                anchors.fill: parent
+                source: subtitleBar.translator ? subtitleBar.translator.coverImage : ""
+                cache: false
+                smooth: true
+                fillMode: Image.Stretch
+                // Blur turns the coloured cells into a smooth frosted patch with soft edges
+                layer.enabled: true
+                layer.effect: MultiEffect {
+                    blurEnabled: true
+                    blur: 1.0
+                    blurMax: 24
+                    autoPaddingEnabled: true
+                    brightness: -0.10
+                }
+            }
+        }
+
         Item {
             id: subtitleBlock
             width: Math.min(subtitleBar.videoRect.width * 0.9,
@@ -478,10 +511,10 @@ Item {
             opacity: subtitleBar.allowed && subtitleBar.shown && !!subtitleBar.translator && subtitleBar.translator.text.length > 0 ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 140 } }
 
-            // Cover style only: a slim strip that hides the English line underneath
+            // Cover style fallback (video format without colour info): a slim dark strip
             Rectangle {
                 anchors.fill: parent
-                visible: subtitleBar.coverStyle
+                visible: subtitleBar.coverStyle && !coverPatch.active
                 radius: Math.min(10, height / 2)
                 color: Qt.rgba(0.02, 0.02, 0.03, 0.82)
             }
@@ -491,7 +524,7 @@ Item {
                 anchors.centerIn: parent
                 spacing: 2
                 // Soft shadow under the letters keeps them readable on bright scenes without a box
-                layer.enabled: !subtitleBar.coverStyle
+                layer.enabled: true
                 layer.effect: MultiEffect {
                     shadowEnabled: true
                     shadowColor: "#000000"
@@ -510,7 +543,7 @@ Item {
                     font.family: "Noto Sans Arabic"
                     font.pixelSize: subtitleBar.fontPx
                     font.weight: Font.Medium
-                    style: subtitleBar.coverStyle ? Text.Normal : Text.Outline
+                    style: Text.Outline
                     styleColor: "#73000000"
                     color: "#ffffff"
                     text: subtitleBar.translator ? subtitleBar.translator.text : ""
