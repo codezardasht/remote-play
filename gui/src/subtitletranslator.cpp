@@ -11,6 +11,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QThread>
 #include <QThreadPool>
 #include <QUrl>
@@ -31,10 +32,10 @@ namespace {
 constexpr qint64 kGrabIntervalMs = 120;    // about 8 looks per second
 constexpr qint64 kMinSendGapMs = 250;      // never more than 4 requests per second
 constexpr int kMaxInFlight = 2;            // a new line doesn't wait for the previous answer
-constexpr int kCell = 4;                   // change-detection grid: 4x4 pixel cells
-constexpr int kMinInkCells = 30;           // less than this = no text in the area
-constexpr double kStableIoU = 0.80;        // same text as the previous look
-constexpr double kNewIoU = 0.60;           // different from the last line sent
+constexpr int kCell = 2;                   // change-detection grid: 2x2 pixel cells (fine enough to tell two sentences apart)
+constexpr int kMinInkCells = 120;          // less than this = no text in the area
+constexpr double kStableIoU = 0.70;        // same text as the previous look
+constexpr double kNewIoU = 0.55;           // different from the last line sent
 constexpr int kMaxImageWidth = 1568;       // larger images are resized by the API anyway
 constexpr int kRecentLines = 4;
 
@@ -90,29 +91,20 @@ QString systemPrompt(const QString &language)
         "(spoken dialogue, often starting with the speaker's name and a colon) and/or an on-screen mission or "
         "objective text. It may also contain parts of the game world, the HUD, a minimap, button prompts, money, "
         "ammo or score counters: those are not subtitles.\n\n"
-        "Fill the fields in this order:\n"
-        "- original: the subtitle or objective text exactly as written, joined into one line. Leave out HUD numbers, "
-        "button prompts and text that belongs to the game world (signs, posters, number plates).\n"
-        "- speaker: the speaker's name if the line starts with one (for example \"FRANKLIN:\"), otherwise empty. "
-        "Do not repeat it in original.\n"
-        "- translation: original translated into %1. Use a natural spoken style the player understands at a glance, "
-        "about as short as the original. Keep the meaning, tone and attitude of slang and jokes instead of translating "
-        "word by word. Swearing may stay, but don't make it stronger.\n"
-        "%2"
-        "- has_subtitle: false when there is no readable subtitle or objective text, or it is too cut off to "
-        "understand; then leave the other fields empty.\n")
+        "Answer in plain text, nothing else:\n"
+        "Line 1: the subtitle or objective text translated into %1.\n"
+        "Line 2: the same text in the original language exactly as written, joined into one line.\n"
+        "If there is no readable subtitle or objective text, or it is too cut off to understand, answer only: NONE\n\n"
+        "Rules:\n"
+        "- Leave out HUD numbers, button prompts and text that belongs to the game world (signs, posters, number plates).\n"
+        "- Leave out a speaker name at the start of the line (for example \"FRANKLIN:\").\n"
+        "- Use a natural spoken style the player understands at a glance, about as short as the original. Keep the "
+        "meaning, tone and attitude of slang and jokes instead of translating word by word. Swearing may stay, but "
+        "don't make it stronger.\n"
+        "%2")
         .arg(languageName(language), lang_rules);
 }
 
-// Written by hand because QJsonObject sorts keys: the answer follows this order, and the translation
-// must come before the English copy so it can be shown as soon as it is written.
-const char *kSubtitleSchema =
-    R"({"type":"object","properties":{)"
-    R"("has_subtitle":{"type":"boolean"},)"
-    R"("speaker":{"type":"string"},)"
-    R"("translation":{"type":"string"},)"
-    R"("original":{"type":"string"}},)"
-    R"("required":["has_subtitle","speaker","translation","original"],"additionalProperties":false})";
 
 // Haiku 5.5 may run without thinking (fastest). Sonnet 5.5 and Opus 5.5 reject that,
 // so they keep adaptive thinking and use low effort instead.
@@ -348,14 +340,18 @@ void SubtitleTranslator::processFrame(AVFrame *frame)
         QMetaObject::invokeMethod(this, [this, text_box]() { setLiveBox(text_box); }, Qt::QueuedConnection);
     }
 
-    const bool stable = iou(mask, prev_mask) >= kStableIoU;   // text stopped changing (typewriter effects, fades)
-    const bool is_new = iou(mask, sent_mask) < kNewIoU;       // not the line we already sent
+    const double iou_prev = iou(mask, prev_mask);
+    const double iou_sent = iou(mask, sent_mask);
+    const bool stable = iou_prev >= kStableIoU;   // text stopped changing (typewriter effects, fades)
+    const bool is_new = iou_sent < kNewIoU;       // not the line we already sent
     const qint64 now = clock.elapsed();
     const bool send = stable && is_new && now - last_send_ms >= kMinSendGapMs;
     prev_mask = mask;
     if (!send)
         return;
 
+    qCInfo(chiakiSubtitles).nospace() << "new line seen: ink " << ink << ", same as previous look "
+                                      << int(iou_prev * 100) << "%, same as last sent " << int(iou_sent * 100) << "%";
     sent_mask = std::move(mask);
     last_send_ms = now;
 
@@ -438,10 +434,9 @@ QByteArray SubtitleTranslator::buildRequest(const Config &c, const QByteArray &i
         { "system", systemPrompt(c.language) },
         { "messages", QJsonArray{ QJsonObject{ { "role", "user" }, { "content", content } } } },
     };
-    addSpeedSettings(body, c.model, QJsonObject{ { "type", "json_schema" }, { "schema", "@SCHEMA@" } });
-    QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
-    json.replace("\"@SCHEMA@\"", kSubtitleSchema);
-    return json;
+    // Plain text, not a fixed JSON format: measured about 0.5 s faster to the first word
+    addSpeedSettings(body, c.model);
+    return QJsonDocument(body).toJson(QJsonDocument::Compact);
 }
 
 static QNetworkRequest apiRequest(const QString &api_key)
@@ -455,59 +450,6 @@ static QNetworkRequest apiRequest(const QString &api_key)
 }
 
 namespace {
-
-// Reading fields out of a JSON answer that is still being written
-int valueStart(const QString &s, const char *key)
-{
-    const QString quoted = QStringLiteral("\"%1\"").arg(QLatin1String(key));
-    int i = s.indexOf(quoted);
-    if (i < 0)
-        return -1;
-    i += quoted.size();
-    while (i < s.size() && s[i].isSpace())
-        i++;
-    if (i >= s.size() || s[i] != QLatin1Char(':'))
-        return -1;
-    i++;
-    while (i < s.size() && s[i].isSpace())
-        i++;
-    return i < s.size() ? i : -1;
-}
-
-bool partialString(const QString &s, const char *key, QString &out)
-{
-    const int i = valueStart(s, key);
-    if (i < 0 || s[i] != QLatin1Char('"'))
-        return false;
-    bool escaped = false;
-    for (int j = i + 1; j < s.size(); j++) {
-        if (escaped) {
-            escaped = false;
-        } else if (s[j] == QLatin1Char('\\')) {
-            escaped = true;
-        } else if (s[j] == QLatin1Char('"')) {
-            const QJsonDocument doc = QJsonDocument::fromJson((QStringLiteral("[") + s.mid(i, j - i + 1) + QStringLiteral("]")).toUtf8());
-            if (!doc.isArray())
-                return false;
-            out = doc.array().at(0).toString();
-            return true;
-        }
-    }
-    return false;
-}
-
-// -1 = not written yet, 0 = false, 1 = true
-int partialBool(const QString &s, const char *key)
-{
-    const int i = valueStart(s, key);
-    if (i < 0)
-        return -1;
-    if (s.mid(i, 4) == QLatin1String("true"))
-        return 1;
-    if (s.mid(i, 5) == QLatin1String("false"))
-        return 0;
-    return -1;
-}
 
 } // namespace
 
@@ -576,29 +518,45 @@ void SubtitleTranslator::readStream(QNetworkReply *reply, const std::shared_ptr<
     }
 }
 
+static QString cleanLine(QString line)
+{
+    line = line.trimmed();
+    // Strip quotes or a "Line 1:" label if the model adds one
+    static const QRegularExpression label(QStringLiteral("^(line\\s*\\d\\s*:\\s*)"), QRegularExpression::CaseInsensitiveOption);
+    line.remove(label);
+    if (line.size() >= 2 && (line.startsWith(QLatin1Char('"')) && line.endsWith(QLatin1Char('"'))))
+        line = line.mid(1, line.size() - 2).trimmed();
+    return line;
+}
+
+static bool isNone(const QString &answer)
+{
+    return answer.trimmed().startsWith(QLatin1String("NONE"));
+}
+
 void SubtitleTranslator::showEarly(const std::shared_ptr<Request> &req)
 {
     if (req->shown || req->no_subtitle)
         return;
-    const int has = partialBool(req->answer, "has_subtitle");
-    if (has == 0) {
+    if (isNone(req->answer)) {
         req->no_subtitle = true;
         return;
     }
-    QString translation;
-    if (has != 1 || !partialString(req->answer, "translation", translation))
+    // The translation is the first line: show it as soon as that line is finished
+    const int newline = req->answer.indexOf(QLatin1Char('\n'));
+    if (newline < 0)
         return;
-    QString speaker;
-    partialString(req->answer, "speaker", speaker);
-    showTranslation(req, translation.trimmed(), speaker.trimmed());
+    showTranslation(req, cleanLine(req->answer.left(newline)), QString());
 }
 
 void SubtitleTranslator::showTranslation(const std::shared_ptr<Request> &req, const QString &translation, const QString &speaker)
 {
     req->shown = true;
     // An older line that finishes after a newer one is already on screen is not shown
-    if (translation.isEmpty() || req->seq <= shown_seq)
+    if (translation.isEmpty() || req->seq <= shown_seq) {
+        qCInfo(chiakiSubtitles) << "line" << req->seq << "not shown: a newer line is already on screen";
         return;
+    }
     shown_seq = req->seq;
     current_text = translation;
     current_speaker = speaker;
@@ -662,11 +620,13 @@ void SubtitleTranslator::finishStream(QNetworkReply *reply, const std::shared_pt
         return;
     }
 
-    const QJsonObject result = QJsonDocument::fromJson(req->answer.toUtf8()).object();
-    const QString translation = result.value("translation").toString().trimmed();
-    if (result.value("has_subtitle").toBool() && !translation.isEmpty()) {
-        const QString speaker = result.value("speaker").toString().trimmed();
-        const QString original = result.value("original").toString().trimmed();
+    const QStringList lines = req->answer.trimmed().split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    const QString translation = lines.isEmpty() || isNone(req->answer) ? QString() : cleanLine(lines.at(0));
+    if (translation.isEmpty())
+        qCInfo(chiakiSubtitles) << "line" << req->seq << ": Claude found no subtitle in the image";
+    if (!translation.isEmpty()) {
+        const QString speaker;
+        const QString original = lines.size() > 1 ? cleanLine(lines.mid(1).join(QLatin1Char(' '))) : QString();
         if (!req->shown)
             showTranslation(req, translation, speaker);
         // The English copy arrives last; add it to the line on screen if that is still this one
