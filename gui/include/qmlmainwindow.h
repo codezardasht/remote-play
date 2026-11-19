@@ -160,6 +160,9 @@ public:
     Q_INVOKABLE void requestOverlayUpdate();
     Q_INVOKABLE void setOverlayInteractionActive(bool active);
     Q_INVOKABLE void setStatsOverlayActive(bool active);
+    // A small spot of the stream overlay (window coordinates) that takes mouse clicks during play,
+    // e.g. the in-game Settings button. Everywhere else the mouse keeps going to the console.
+    Q_INVOKABLE void setOverlayHotZone(const QRectF &rect);
     Q_INVOKABLE void noteLoadingTransitionComplete();
     Q_INVOKABLE void presentStartupWarmupFrame(unsigned width, unsigned height, bool hdr);
     void armVerbosePlaceboQuietWindow();
@@ -186,6 +189,7 @@ signals:
     void zoomFactorChanged();
     void videoPresetChanged();
     void menuRequested();
+    void settingsRequested();
     void directStreamChanged();
     void queueDepthAverageChanged();
     void pendingFrameAgeChanged();
@@ -336,6 +340,8 @@ private:
     QAtomicInteger<int> stream_width_current = 0;
     QAtomicInteger<int> stream_height_current = 0;
     SubtitleTranslator *subtitle_translator = nullptr;
+    QRectF overlay_hot_zone;
+    bool cursor_in_hot_zone = false;
     bool going_full = false;
     VideoMode video_mode = VideoMode::Normal;
     float zoom_factor = 0;

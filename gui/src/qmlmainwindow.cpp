@@ -2773,6 +2773,11 @@ void QmlMainWindow::releaseInput()
         session->BlockInput(grab_input);
 }
 
+void QmlMainWindow::setOverlayHotZone(const QRectF &rect)
+{
+    overlay_hot_zone = rect;
+}
+
 void QmlMainWindow::requestOverlayUpdate()
 {
     scheduleUpdate(true, UpdateRequestReason::Unknown);
@@ -7710,6 +7715,9 @@ bool QmlMainWindow::handleShortcut(QKeyEvent *event)
     case Qt::Key_O:
         emit menuRequested();
         return true;
+    case Qt::Key_Comma:
+        emit settingsRequested();
+        return true;
     case Qt::Key_Q:
 #ifndef Q_OS_MACOS
         close();
@@ -7739,6 +7747,19 @@ bool QmlMainWindow::event(QEvent *event)
         if (static_cast<QMouseEvent*>(event)->source() != Qt::MouseEventNotSynthesized)
             return true;
         if (session && !grab_input) {
+            // The in-game Settings button: clicks there go to the app, not the console
+            const bool in_zone = overlay_hot_zone.isValid() && overlay_hot_zone.contains(static_cast<QMouseEvent*>(event)->position());
+            if (in_zone != cursor_in_hot_zone) {
+                cursor_in_hot_zone = in_zone;
+                if (in_zone)
+                    setCursor(Qt::ArrowCursor);
+                else if (has_video && settings->GetHideCursor())
+                    setCursor(Qt::BlankCursor);
+            }
+            if (in_zone) {
+                QGuiApplication::sendEvent(quick_window, event);
+                return true;
+            }
             if (event->type() == QEvent::MouseMove)
                 session->HandleMouseMoveEvent(static_cast<QMouseEvent*>(event), width(), height());
             else if (event->type() == QEvent::MouseButtonPress)

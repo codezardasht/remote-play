@@ -86,6 +86,30 @@ Item {
         sessionLoading = !(Chiaki.window.loadingTransitionComplete || (Chiaki.settings.audioVideoDisabled & 0x02));
     }
     StackView.onDeactivated: Chiaki.window.keepVideo = false
+    // Back from Settings opened during play: give the controls back to the game
+    StackView.onActivated: {
+        if (settingsOpenFromStream) {
+            settingsOpenFromStream = false;
+            view.releaseInput();
+        }
+    }
+
+    // Full Settings over the running game; closing it returns straight to playing
+    property bool settingsOpenFromStream: false
+    function openFullSettings() {
+        if (!Chiaki.session || settingsOpenFromStream)
+            return;
+        if (menuController.open)
+            menuController.close();
+        view.grabInput(null);
+        settingsOpenFromStream = true;
+        root.showSettingsDialog();
+    }
+
+    Connections {
+        target: Chiaki.window
+        function onSettingsRequested() { view.openFullSettings(); }
+    }
 
     Component.onCompleted: {
         updateSeparateMenuGeometry();
@@ -578,6 +602,57 @@ Item {
         styleColor: "#cc000000"
         color: "#ffd45c"
         text: translator ? qsTr("Translation: %1").arg(translator.status) : ""
+    }
+
+    // Small Settings button just after the stats (top-left). Opens the full Settings over the game;
+    // closing them goes straight back to playing. Also Ctrl+, or the in-game menu.
+    Rectangle {
+        id: streamSettingsButton
+        readonly property bool shown: !!Chiaki.session && !(menuController.open || menuController.closing)
+                                      && !view.sessionLoading && !view.sessionError && !view.settingsOpenFromStream
+        x: statsHud.visible ? statsHud.x + statsHud.width + 12 : 18
+        y: statsHud.visible ? statsHud.y - 3 : 14
+        width: 28
+        height: 28
+        radius: 14
+        visible: shown
+        color: settingsButtonMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.22) : Qt.rgba(0, 0, 0, 0.28)
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, settingsButtonMouse.containsMouse ? 0.45 : 0.18)
+        opacity: settingsButtonMouse.containsMouse ? 1.0 : 0.6
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+
+        Image {
+            anchors.centerIn: parent
+            width: 16
+            height: 16
+            sourceSize: Qt.size(32, 32)
+            source: "qrc:/icons/settings-20px.svg"
+        }
+
+        MouseArea {
+            id: settingsButtonMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: view.openFullSettings()
+        }
+
+        // Tell the window which spot takes clicks during play (the rest still goes to the console)
+        function updateHotZone() {
+            if (!shown || !visible) {
+                Chiaki.window.setOverlayHotZone(Qt.rect(0, 0, 0, 0));
+                return;
+            }
+            const p = mapToItem(null, 0, 0);
+            Chiaki.window.setOverlayHotZone(Qt.rect(p.x - 4, p.y - 4, width + 8, height + 8));
+        }
+        onXChanged: updateHotZone()
+        onYChanged: updateHotZone()
+        onVisibleChanged: updateHotZone()
+        onShownChanged: updateHotZone()
+        Component.onCompleted: updateHotZone()
+        Component.onDestruction: Chiaki.window.setOverlayHotZone(Qt.rect(0, 0, 0, 0))
     }
 
     // Small in-stream stats HUD (FPS, resolution, packet loss, bitrate).
@@ -1239,7 +1314,7 @@ Item {
                     if(Chiaki.window.videoPreset == ChiakiWindow.VideoPreset.Custom)
                         placeboSettingsButton;
                     else
-                        displaySettingsButton;
+                        allSettingsButton;
                 }
                 Keys.onReturnPressed: {
                     menuController.close();
@@ -1256,11 +1331,24 @@ Item {
                 checkable: false
                 onClicked: root.openPlaceboSettings()
                 KeyNavigation.left: displaySettingsButton
+                KeyNavigation.right: allSettingsButton
                 visible: Chiaki.window.videoPreset == ChiakiWindow.VideoPreset.Custom
                 Keys.onReturnPressed: {
                     menuController.close();
                     clicked();
                 }
+                Keys.onEscapePressed: menuController.close()
+            }
+
+            ToolButton {
+                id: allSettingsButton
+                text: qsTr("Settings")
+                icon.source: "qrc:/icons/settings-20px.svg";
+                padding: 10
+                checkable: false
+                onClicked: view.openFullSettings()
+                KeyNavigation.left: Chiaki.window.videoPreset == ChiakiWindow.VideoPreset.Custom ? placeboSettingsButton : displaySettingsButton
+                Keys.onReturnPressed: clicked()
                 Keys.onEscapePressed: menuController.close()
             }
             }
