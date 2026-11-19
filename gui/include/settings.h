@@ -285,6 +285,8 @@ class Settings : public QObject
 		// 0 = clean subtitle text just above the game's line, 1 = cover the game's line with a slim strip
 		int GetSubtitlesStyle() const              { return settings.value("settings/subtitles_style", 0).toInt(); }
 		void SetSubtitlesStyle(int style)          { settings.setValue("settings/subtitles_style", style); }
+		bool GetSubtitlesInstant() const           { return settings.value("settings/subtitles_instant", true).toBool(); }
+		void SetSubtitlesInstant(bool enabled)     { settings.setValue("settings/subtitles_instant", enabled); }
 		QString GetClaudeApiKey() const            { return settings.value("settings/claude_api_key").toString(); }
 		void SetClaudeApiKey(const QString &key)   { settings.setValue("settings/claude_api_key", key); }
 

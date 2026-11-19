@@ -14,6 +14,8 @@
 #include <QRegularExpression>
 #include <QThread>
 #include <QThreadPool>
+#include <QTimer>
+#include <QHash>
 #include <QUrl>
 
 #include <algorithm>
@@ -31,7 +33,9 @@ namespace {
 
 constexpr qint64 kGrabIntervalMs = 120;    // about 8 looks per second
 constexpr qint64 kMinSendGapMs = 250;      // never more than 4 requests per second
-constexpr int kMaxInFlight = 2;            // a new line doesn't wait for the previous answer
+constexpr int kMaxInFlight = 2;
+constexpr int kBackupAfterMs = 900;       // no answer by then: send a backup copy of the request
+constexpr int kKeepAliveMs = 20000;       // keep the connection to Claude open between lines            // a new line doesn't wait for the previous answer
 constexpr int kCell = 2;                   // change-detection grid: 2x2 pixel cells (fine enough to tell two sentences apart)
 constexpr int kMinInkCells = 120;          // less than this = no text in the area
 constexpr double kStableIoU = 0.70;        // same text as the previous look
@@ -137,6 +141,15 @@ SubtitleTranslator::SubtitleTranslator(QObject *parent)
     , network(new QNetworkAccessManager(this))
 {
     clock.start();
+    // Keep the secure connection to Claude open between lines, so a line after a quiet moment
+    // doesn't wait for a new connection
+    auto *keep_alive = new QTimer(this);
+    keep_alive->setInterval(kKeepAliveMs);
+    connect(keep_alive, &QTimer::timeout, this, [this]() {
+        if (is_active)
+            network->connectToHostEncrypted(QStringLiteral("api.anthropic.com"));
+    });
+    keep_alive->start();
 }
 
 SubtitleTranslator::~SubtitleTranslator()
@@ -163,6 +176,7 @@ void SubtitleTranslator::refresh(bool session_running)
     next.api_key = settings->GetClaudeApiKey().trimmed();
     next.model = settings->GetSubtitlesModel();
     next.language = settings->GetSubtitlesLanguage();
+    next.instant = settings->GetSubtitlesInstant();
     {
         QMutexLocker lock(&config_mutex);
         cfg = next;
@@ -458,11 +472,17 @@ struct SubtitleTranslator::Request {
     QRectF box;
     qint64 seen_ms = 0;
     qint64 sent_ms = 0;
-    QByteArray buffer;      // unparsed stream data
-    QByteArray error_body;  // body of a failed request
-    QString answer;         // the JSON answer as written so far
-    bool shown = false;
+    QByteArray body;                 // kept to send a backup copy
+    QString api_key;
+    QList<QNetworkReply *> replies;  // the first try and maybe a backup copy
+    QNetworkReply *winner = nullptr; // the copy that started answering first; the other is cancelled
+    int open = 0;
+    QHash<QNetworkReply *, QByteArray> buffers;      // unparsed stream data
+    QHash<QNetworkReply *, QByteArray> error_bodies; // body of a failed copy
+    QString answer;                  // the answer as written so far
     bool no_subtitle = false;
+    bool line_complete = false;
+    bool done = false;
     QString stop_reason;
     QString stream_error;
     double in_tokens = 0, out_tokens = 0;
@@ -478,9 +498,29 @@ void SubtitleTranslator::startRequest(const QByteArray &image, const QString &me
     req->box = box;
     req->seen_ms = seen_ms;
     req->sent_ms = clock.elapsed();
+    req->body = buildRequest(c, image, media_type);
+    req->api_key = c.api_key;
     in_flight++;
-    QNetworkReply *reply = network->post(apiRequest(c.api_key), buildRequest(c, image, media_type));
-    // The answer is streamed, so the translation can be shown as soon as it is written
+    sendCopy(req);
+
+    // Claude sometimes takes 2-3 s to start. If it hasn't started after a short wait, send the same
+    // request again and use whichever answers first (costs a little more, only when Claude is slow).
+    std::weak_ptr<Request> weak = req;
+    QTimer::singleShot(kBackupAfterMs, this, [this, weak]() {
+        auto r = weak.lock();
+        if (!r || r->winner || r->done || r->open <= 0 || !is_active || r->replies.size() > 1)
+            return;
+        qCInfo(chiakiSubtitles) << "line" << r->seq << ": Claude is slow, sending a backup request";
+        sendCopy(r);
+    });
+}
+
+void SubtitleTranslator::sendCopy(const std::shared_ptr<Request> &req)
+{
+    QNetworkReply *reply = network->post(apiRequest(req->api_key), req->body);
+    req->replies.append(reply);
+    req->open++;
+    // The answer is streamed, so the translation can be shown while it is written
     connect(reply, &QNetworkReply::readyRead, this, [this, reply, req]() { readStream(reply, req); });
     connect(reply, &QNetworkReply::finished, this, [this, reply, req]() { finishStream(reply, req); });
 }
@@ -489,14 +529,19 @@ void SubtitleTranslator::readStream(QNetworkReply *reply, const std::shared_ptr<
 {
     const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (http != 200) {
-        req->error_body += reply->readAll();
+        req->error_bodies[reply] += reply->readAll();
         return;
     }
-    req->buffer += reply->readAll();
+    if (req->winner && reply != req->winner) {
+        reply->readAll();
+        return;
+    }
+    QByteArray &buffer = req->buffers[reply];
+    buffer += reply->readAll();
     int newline;
-    while ((newline = req->buffer.indexOf('\n')) >= 0) {
-        const QByteArray line = req->buffer.left(newline).trimmed();
-        req->buffer.remove(0, newline + 1);
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+        const QByteArray line = buffer.left(newline).trimmed();
+        buffer.remove(0, newline + 1);
         if (!line.startsWith("data:"))
             continue;
         const QJsonObject event = QJsonDocument::fromJson(line.mid(5).trimmed()).object();
@@ -505,10 +550,18 @@ void SubtitleTranslator::readStream(QNetworkReply *reply, const std::shared_ptr<
             req->in_tokens = event.value("message").toObject().value("usage").toObject().value("input_tokens").toDouble();
         } else if (type == QLatin1String("content_block_delta")) {
             const QJsonObject delta = event.value("delta").toObject();
-            if (delta.value("type").toString() == QLatin1String("text_delta")) {
-                req->answer += delta.value("text").toString();
-                showEarly(req);
+            if (delta.value("type").toString() != QLatin1String("text_delta"))
+                continue;
+            if (!req->winner) {
+                req->winner = reply;
+                // The other copy is no longer needed
+                for (QNetworkReply *other : std::as_const(req->replies)) {
+                    if (other != reply && other->isRunning())
+                        other->abort();
+                }
             }
+            req->answer += delta.value("text").toString();
+            updateLine(req, false);
         } else if (type == QLatin1String("message_delta")) {
             req->stop_reason = event.value("delta").toObject().value("stop_reason").toString();
             req->out_tokens = event.value("usage").toObject().value("output_tokens").toDouble();
@@ -524,9 +577,11 @@ static QString cleanLine(QString line)
     // Strip quotes or a "Line 1:" label if the model adds one
     static const QRegularExpression label(QStringLiteral("^(line\\s*\\d\\s*:\\s*)"), QRegularExpression::CaseInsensitiveOption);
     line.remove(label);
-    if (line.size() >= 2 && (line.startsWith(QLatin1Char('"')) && line.endsWith(QLatin1Char('"'))))
-        line = line.mid(1, line.size() - 2).trimmed();
-    return line;
+    if (line.startsWith(QLatin1Char('"')))
+        line.remove(0, 1);
+    if (line.endsWith(QLatin1Char('"')))
+        line.chop(1);
+    return line.trimmed();
 }
 
 static bool isNone(const QString &answer)
@@ -534,52 +589,85 @@ static bool isNone(const QString &answer)
     return answer.trimmed().startsWith(QLatin1String("NONE"));
 }
 
-void SubtitleTranslator::showEarly(const std::shared_ptr<Request> &req)
+// Shows the translation (first line of the answer). In instant mode it is shown word by word while it is
+// written; otherwise once the line is finished. `final` = the answer is complete.
+void SubtitleTranslator::updateLine(const std::shared_ptr<Request> &req, bool final)
 {
-    if (req->shown || req->no_subtitle)
+    if (req->no_subtitle || req->line_complete)
         return;
-    if (isNone(req->answer)) {
+    const QString trimmed = req->answer.trimmed();
+    if (isNone(trimmed)) {
         req->no_subtitle = true;
         return;
     }
-    // The translation is the first line: show it as soon as that line is finished
-    const int newline = req->answer.indexOf(QLatin1Char('\n'));
-    if (newline < 0)
+    // "N", "NO", "NON" could still become NONE: wait
+    if (!final && QStringLiteral("NONE").startsWith(trimmed))
         return;
-    showTranslation(req, cleanLine(req->answer.left(newline)), QString());
-}
 
-void SubtitleTranslator::showTranslation(const std::shared_ptr<Request> &req, const QString &translation, const QString &speaker)
-{
-    req->shown = true;
-    // An older line that finishes after a newer one is already on screen is not shown
-    if (translation.isEmpty() || req->seq <= shown_seq) {
+    const int newline = req->answer.indexOf(QLatin1Char('\n'), req->answer.indexOf(QRegularExpression(QStringLiteral("\\S"))));
+    const bool complete = final || newline >= 0;
+    QString part = newline >= 0 ? req->answer.left(newline) : req->answer;
+    if (!complete) {
+        if (!config().instant)
+            return;
+        // Whole words only, so a half-written word never shows
+        const int space = part.lastIndexOf(QLatin1Char(' '));
+        if (space <= 0)
+            return;
+        part = part.left(space);
+    }
+    const QString text = cleanLine(part);
+    if (text.isEmpty())
+        return;
+    if (complete)
+        req->line_complete = true;
+
+    // An older line that arrives after a newer one is already on screen is not shown
+    if (req->seq < shown_seq) {
         qCInfo(chiakiSubtitles) << "line" << req->seq << "not shown: a newer line is already on screen";
         return;
     }
-    shown_seq = req->seq;
-    current_text = translation;
-    current_speaker = speaker;
-    current_original.clear();
-    current_box = req->box;
-    current_serial++;
-    emit subtitleChanged();
-    emit originalChanged();
+
     const qint64 now = clock.elapsed();
-    qCInfo(chiakiSubtitles).nospace() << "line on screen " << (now - req->seen_ms) << " ms after it was seen ("
-                                      << (req->sent_ms - req->seen_ms) << " ms to send, "
-                                      << (now - req->sent_ms) << " ms Claude)";
+    if (req->seq > shown_seq) {
+        shown_seq = req->seq;
+        current_box = req->box;
+        current_original.clear();
+        current_speaker.clear();
+        current_text = text;
+        current_complete = complete;
+        current_serial++;
+        emit subtitleChanged();
+        emit textChanged();
+        emit originalChanged();
+        qCInfo(chiakiSubtitles).nospace() << "line " << req->seq << " on screen " << (now - req->seen_ms) << " ms after it was seen ("
+                                          << (req->sent_ms - req->seen_ms) << " ms to send, "
+                                          << (now - req->sent_ms) << " ms Claude" << (complete ? "" : ", first words") << ")";
+    } else if (text != current_text || complete != current_complete) {
+        current_text = text;
+        current_complete = complete;
+        emit textChanged();
+        if (complete)
+            qCInfo(chiakiSubtitles).nospace() << "line " << req->seq << " complete " << (now - req->seen_ms) << " ms after it was seen";
+    }
 }
 
 void SubtitleTranslator::finishStream(QNetworkReply *reply, const std::shared_ptr<Request> &req)
 {
     reply->deleteLater();
+    req->open--;
+    // A cancelled or failed copy while the other one is still answering (or already won) changes nothing
+    if (req->done || (req->winner && reply != req->winner) || (!req->winner && req->open > 0))
+        return;
+
     if (reply->bytesAvailable())
         readStream(reply, req);
-    if (!req->buffer.isEmpty()) {
-        req->buffer += '\n';
+    QByteArray &buffer = req->buffers[reply];
+    if (!buffer.isEmpty()) {
+        buffer += '\n';
         readStream(reply, req);
     }
+    req->done = true;
     in_flight = std::max(0, in_flight - 1);
     const int http = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const Config c = config();
@@ -598,7 +686,7 @@ void SubtitleTranslator::finishStream(QNetworkReply *reply, const std::shared_pt
         return;
     }
     if (http != 200) {
-        reportHttpError(http, QJsonDocument::fromJson(req->error_body).object(), c);
+        reportHttpError(http, QJsonDocument::fromJson(req->error_bodies.value(reply)).object(), c);
         next();
         return;
     }
@@ -609,7 +697,8 @@ void SubtitleTranslator::finishStream(QNetworkReply *reply, const std::shared_pt
         return;
     }
 
-    addCost(c, req->in_tokens, req->out_tokens);
+    // A backup copy that was cancelled had already been charged for its input
+    addCost(c, req->in_tokens * req->replies.size(), req->out_tokens);
     if (status_error)
         setStatus(QString(), false);
 
@@ -620,22 +709,19 @@ void SubtitleTranslator::finishStream(QNetworkReply *reply, const std::shared_pt
         return;
     }
 
+    updateLine(req, true);
     const QStringList lines = req->answer.trimmed().split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     const QString translation = lines.isEmpty() || isNone(req->answer) ? QString() : cleanLine(lines.at(0));
-    if (translation.isEmpty())
+    if (translation.isEmpty()) {
         qCInfo(chiakiSubtitles) << "line" << req->seq << ": Claude found no subtitle in the image";
-    if (!translation.isEmpty()) {
-        const QString speaker;
+    } else {
         const QString original = lines.size() > 1 ? cleanLine(lines.mid(1).join(QLatin1Char(' '))) : QString();
-        if (!req->shown)
-            showTranslation(req, translation, speaker);
         // The English copy arrives last; add it to the line on screen if that is still this one
         if (shown_seq == req->seq && current_original != original) {
             current_original = original;
             emit originalChanged();
         }
-        recent_lines.append(QStringLiteral("%1%2 => %3")
-                                .arg(speaker.isEmpty() ? QString() : speaker + QStringLiteral(": "), original, translation));
+        recent_lines.append(QStringLiteral("%1 => %2").arg(original, translation));
         while (recent_lines.size() > kRecentLines)
             recent_lines.removeFirst();
     }
@@ -724,7 +810,9 @@ void SubtitleTranslator::clearSubtitle()
     current_original.clear();
     current_speaker.clear();
     current_box = QRectF();
+    current_complete = true;
     current_serial++;
     emit subtitleChanged();
+    emit textChanged();
     emit originalChanged();
 }

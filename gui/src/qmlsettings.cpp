@@ -182,6 +182,17 @@ void QmlSettings::setSubtitlesStyle(int style)
     emit subtitlesChanged();
 }
 
+bool QmlSettings::subtitlesInstant() const
+{
+    return settings->GetSubtitlesInstant();
+}
+
+void QmlSettings::setSubtitlesInstant(bool enabled)
+{
+    settings->SetSubtitlesInstant(enabled);
+    emit subtitlesChanged();
+}
+
 QString QmlSettings::claudeApiKey() const
 {
     return settings->GetClaudeApiKey();

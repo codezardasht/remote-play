@@ -33,7 +33,9 @@ class QJsonObject;
 class SubtitleTranslator : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(QString text READ text NOTIFY subtitleChanged)
+    // The translation on screen. In instant mode it grows word by word while Claude writes it.
+    Q_PROPERTY(QString text READ text NOTIFY textChanged)
+    Q_PROPERTY(bool complete READ complete NOTIFY textChanged)
     // The English line arrives a moment after the translation
     Q_PROPERTY(QString original READ original NOTIFY originalChanged)
     Q_PROPERTY(QString speaker READ speaker NOTIFY subtitleChanged)
@@ -62,6 +64,7 @@ public:
     void submitFrame(AVFrame *frame);
 
     QString text() const { return current_text; }
+    bool complete() const { return current_complete; }
     QString original() const { return current_original; }
     QString speaker() const { return current_speaker; }
     int serial() const { return current_serial; }
@@ -77,7 +80,9 @@ public:
     Q_INVOKABLE void testApiKey();
 
 signals:
+    // A new line started (position and timing are decided once per line)
     void subtitleChanged();
+    void textChanged();
     void originalChanged();
     // The game's own subtitle went away (so ours can fade out)
     void sourceCleared();
@@ -92,15 +97,16 @@ private:
         QString api_key;
         QString model;
         QString language;   // "ckb" or "ar"
+        bool instant = true; // show words while they are written
     };
 
     void processFrame(AVFrame *frame);          // worker thread
     struct Request;
     void sendImage(const QByteArray &image, const QString &media_type, const QRectF &box, qint64 seen_ms);     // main thread
     void startRequest(const QByteArray &image, const QString &media_type, const QRectF &box, qint64 seen_ms);
+    void sendCopy(const std::shared_ptr<Request> &req);
     void readStream(QNetworkReply *reply, const std::shared_ptr<Request> &req);
-    void showEarly(const std::shared_ptr<Request> &req);
-    void showTranslation(const std::shared_ptr<Request> &req, const QString &translation, const QString &speaker);
+    void updateLine(const std::shared_ptr<Request> &req, bool final);
     void finishStream(QNetworkReply *reply, const std::shared_ptr<Request> &req);
     void addCost(const Config &c, double in_tokens, double out_tokens);
     void reportHttpError(int http, const QJsonObject &json, const Config &c);
@@ -141,6 +147,7 @@ private:
     QRectF live_box;
     QStringList recent_lines;   // "speaker: original => translation", for consistent names and wording
     QString current_text;
+    bool current_complete = true;
     QString current_original;
     QString current_speaker;
     int current_serial = 0;

@@ -339,6 +339,10 @@ Item {
         readonly property bool coverStyle: Chiaki.settings.subtitlesStyle === 1
         property bool shown: false
         property double shownAt: 0
+        // Instant mode: the line grows word by word inside a box of fixed width, right to left (the way
+        // Sorani and Arabic are written), so words already on screen never move
+        property bool lineGrowing: false
+        property real lineWidth: 0
         visible: allowed && subtitleBlock.opacity > 0.01
 
         // Where the video is drawn inside the window (same rules as the renderer)
@@ -394,15 +398,29 @@ Item {
                     anchorBottom = englishTop;
             }
             anchorResetTimer.stop();
+            lineGrowing = !translator.complete;
+            // About as wide as the game's English line (similar length in Sorani/Arabic)
+            const englishWidth = b.width > 0 ? b.width * videoRect.width * 1.05 : maxTextWidth * 0.7;
+            lineWidth = Math.max(fontPx * 12, Math.min(maxTextWidth, englishWidth));
             shown = true;
             shownAt = Date.now();
-            subtitleHideTimer.interval = Math.max(3000, Math.min(9000, 2200 + translator.text.length * 80));
+            setHideTime();
+        }
+
+        function setHideTime() {
+            // Still being written: keep it up; once complete, show it for a time that fits its length
+            subtitleHideTimer.interval = !translator.complete ? 10000
+                : Math.max(3000, Math.min(9000, 2200 + translator.text.length * 80));
             subtitleHideTimer.restart();
         }
 
         Connections {
             target: subtitleBar.translator
             function onSubtitleChanged() { subtitleBar.showLine(); }
+            function onTextChanged() {
+                if (subtitleBar.shown && subtitleBar.translator.complete)
+                    subtitleBar.setHideTime();
+            }
             // The game's own line went away: fade ours out too, but keep it at least 1.5 s on screen
             function onSourceCleared() {
                 if (!subtitleBar.shown)
@@ -484,9 +502,9 @@ Item {
                 }
 
                 Text {
-                    width: Math.min(implicitWidth, subtitleBar.maxTextWidth)
+                    width: subtitleBar.lineGrowing ? subtitleBar.lineWidth : Math.min(implicitWidth, subtitleBar.maxTextWidth)
                     anchors.horizontalCenter: parent.horizontalCenter
-                    horizontalAlignment: Text.AlignHCenter
+                    horizontalAlignment: subtitleBar.lineGrowing ? Text.AlignRight : Text.AlignHCenter
                     wrapMode: Text.WordWrap
                     // Sorani and Arabic letters (ڕ ڵ ۆ ێ ە); the system picks another font if this one is missing
                     font.family: "Noto Sans Arabic"

@@ -2103,6 +2103,24 @@ DialogView {
 
                         Label {
                             Layout.alignment: Qt.AlignRight
+                            text: qsTr("Instant Translation")
+                        }
+
+                        C.CheckBox {
+                            checked: Chiaki.settings.subtitlesInstant
+                            onToggled: Chiaki.settings.subtitlesInstant = !Chiaki.settings.subtitlesInstant
+                            text: qsTr("Show the words while Claude writes them (about 0.7 s sooner)")
+                        }
+
+                        Label {
+                            opacity: 0.5
+                            font.pixelSize: 16
+                            Layout.alignment: Qt.AlignRight
+                            text: qsTr("(Checked)")
+                        }
+
+                        Label {
+                            Layout.alignment: Qt.AlignRight
                             text: qsTr("Show English Line")
                         }
 
