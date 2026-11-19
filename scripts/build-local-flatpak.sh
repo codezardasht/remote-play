@@ -25,10 +25,20 @@ sed -e "s|^        url: https://github.com/chiaki-ng/chiaki-ng.git$|        url:
 grep -q "url: file://$REPO" "$WORK/$APP.yaml" || { echo "Couldn't point the manifest at this checkout"; exit 1; }
 grep -q "commit: $SHA" "$WORK/$APP.yaml" || { echo "Couldn't pin the manifest to $SHA"; exit 1; }
 
+# After the first build every third-party source is cached. Only refresh this checkout's copy and skip the
+# network for the rest, so a down server (gitlab.xiph.org, …) can't break a local rebuild.
+# FULL_UPDATE=1 re-checks all sources.
+UPDATES=""
+MIRROR="$WORK/state/git/file_$(printf '%s' "${REPO#/}" | tr '/' '_')"
+if [ "${FULL_UPDATE:-0}" != 1 ] && [ -d "$MIRROR" ]; then
+    git -C "$MIRROR" fetch --quiet --prune "$REPO" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+    git -C "$MIRROR" cat-file -e "$SHA^{commit}" && UPDATES="--disable-updates"
+fi
+
 echo "Building $APP from $REPO at $(git -C "$REPO" log -1 --format='%h %s')"
 cd "$WORK"
 flatpak run org.flatpak.Builder \
-    --user --install --force-clean --disable-rofiles-fuse \
+    --user --install --force-clean --disable-rofiles-fuse $UPDATES \
     --state-dir="$WORK/state" \
     --ccache \
     "$WORK/build" "$WORK/$APP.yaml"
